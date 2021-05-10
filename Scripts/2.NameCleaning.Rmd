@@ -1,0 +1,524 @@
+---
+title: "2. Cleaning Species Names"
+output: 
+  html_document: 
+    toc: yes
+---
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+# Introduction
+
+This script handles the tidying up of the names of the species in BioTIME so that they can be relatively smoothly compared to trait databass. To avoid putting effort into species that will ultimately not be used, the start point for this script is the list of species names in the collated and filtered dataset (`BT_Tables/bt_grid_collate_filter.csv`) output from the gridding script `1.Gridding and Grouping Biotime.Rmd`. 
+
+```{r message = FALSE}
+library(tidyverse)
+library(knitr)
+library(readxl)
+library(taxize)
+library(purrr)
+library(worrms)
+library(lubridate)
+library(data.table)
+library(kableExtra)
+
+meta_compact <- read_csv("../BT_Tables/BioTIMEMetadata_02_04_2018.csv")%>%
+  select(STUDY_ID,TAXA,  ORGANISMS, TITLE )
+
+bt_grid_collate_filter<- read_csv("../BT_Tables/bt_grid_collate_filter.csv" , 
+                                  col_types = cols(
+                                    STUDY_ID_CELL = col_character(),
+                                    STUDY_ID = col_double(),
+                                    YEAR = col_double(),
+                                    ID_SPECIES = col_double(),
+                                    OrigBioTimeNames = col_character(),
+                                    CrossCellAbundance = col_double(),
+                                    CrossCellBiomass = col_double(),
+                                    ABUNDANCE_TYPE = col_character(),
+                                    BIOMASS_TYPE = col_character()
+                                  ))
+
+kableBOX <- function(df){
+  df %>%
+    kable()%>%
+    kable_styling() %>%
+    scroll_box(width = "100%", height = "600px")%>%
+    return()
+}
+
+bt_grid_collate_filter  %>%
+  distinct(STUDY_ID,  ID_SPECIES, OrigBioTimeNames  )-> DistinctNames  # Creating list of species names that need identifying 
+
+```
+
+# Labelling difficult names
+
+As a first step, problematic names were identified and categorised. In a few select places, there seems to have been some manual cleaning up of the GENUS_SPECIES field of BioTIME, in that it does not equal a straight pasting together of the GENUS and SPECIES columns: *Dussia atropurpurea, Herrania nycterodendron, Cestrum schechtendahlii, Chloroscombrus chrysurus, Codium setchellii, Vasconcellea caulifora*. 
+
+## Records without any meaningful species data
+
+952 records have the species field in BioTIME listed as NA. 
+There are number of other "bad" labels too, including variations of "species",  `unidentified", lifestages, taxonomic labels and descriptions.  This list was found through manual inspection and through failures to match early taxonomic searches. 
+
+```{r}
+ProblemSpLabels<-  c("sp","Sp",  "spec","spec." , "ap", "Morphospecies",           # Placeholder labels
+                     paste0("sp", LETTERS[1:26]), 
+                     paste0("sp", letters[1:26]),
+                     "k",  "f",  "B-complex","A-complex",     
+                     
+                     "unidentified",  "unknown", "Unid", "unid",                          # Unidentifiable
+                     "undet","Unidentified", "Unknown",
+                     "fish-unidentifable","undetermined" , "ind","indet", "cf",  
+                     
+                     "dying", "dead",  "Miscellaneous" ,  "blobs", "tubes", "Mixed", "bohater",                # Descriptions
+                     "Filamentous","Encrusting" , "encrusting" ,  "Disintegrated" ,"tube-mat", "Mat", "Branching",
+                     "spine", "Annual",  "hybrid",  "staining" , "Red","red" ,"brown", "turf" ,"tube", 
+                     "community","damaged", "melting", "films", "crust", "group",
+                     "colonial", "Colonial", "eggs","solitary", "epiphyte",
+                     
+                     "nauplii","Young", "larva", "larvae","postlarvae", "megalops","Phyllosoma", "zoea", "megalopa", "Brachiolaria",      ## life stages
+                     
+                     "Class", "Family", "Order", "Phylum","Subclass" ,"Subphylum" ,"Superfamily" ,"Suborder" ,             # Taxonomic levels
+                     
+                     "diatoms",  "diatom",  "Echinoderm", "Grass" ,"Lichens"   , "Moss"       , "kelp"                                                # Too Vague
+)
+
+DistinctNames %>%
+  mutate( Name = str_squish(OrigBioTimeNames   )) %>% # Clean up any whitespace issues
+  separate(Name, c("Pt1", "Pt2", "Remainder") , extra ="merge", sep = " ", fill = "right", remove = FALSE)  %>%
+  mutate(ID_STATUS = ifelse( str_count(Name, pattern = " ")<1 |        # find if only a single word =  only genus info
+                               str_detect(Name, "[0-9.]+")  |
+                               Pt1 %in% ProblemSpLabels  |
+                               Pt2 %in%  ProblemSpLabels ,
+                             "Sp_Not_Specified", "Not Listed Problem")) ->DistinctNames
+
+```
+
+## Common names
+Some studies just entered species as common names, e.g. study 226,  413,414,  415,416,   419. These are mostly bird studies.
+
+```{r}
+CommonNameStudies <- c( 226,  413,414,415,416,419)
+
+DistinctNames %>%
+  filter( STUDY_ID %in%  CommonNameStudies)%>%
+  distinct(OrigBioTimeNames) %>%
+  kableBOX()
+
+DistinctNames %>%
+  mutate(ID_STATUS = ifelse( STUDY_ID %in%  CommonNameStudies, 
+                             "CommonName", ID_STATUS)) -> DistinctNames
+```
+
+## Coded names
+
+A scan for all-caps IDs found studies (Mostly plants, but some birds) that use short-codes for species IDs. Since these would need to be manually paired with the coding regime, these were excluded from further consideration.  
+
+```{r}
+DistinctNames %>%
+  filter(str_detect(Name, "^[:upper:]+$")) %>%
+  distinct(Name ) %>%
+  kableBOX()
+
+DistinctNames %>%
+  filter(str_detect(Name, "^[:upper:]+$")) %>%
+  distinct(STUDY_ID) -> StudiesThatUseCodes
+
+meta_compact%>%
+  filter( STUDY_ID %in% StudiesThatUseCodes$STUDY_ID)
+
+DistinctNames %>%
+  mutate(ID_STATUS = ifelse(str_detect(Name,     "^[:upper:]+$"),  
+                            "SpeciesCoded", ID_STATUS)) -> DistinctNames
+```
+
+## Multiple names
+
+Where names have already been tidied in biotime, can get multiple labels attached to the same species ID number. These were previously combined together with a slash, and can be extracted out. Not very many, but rather awkward. These species share a biotime ID_SPECIES, but have different names. Some are mispellings, but some seem to be incorrect groupings. 
+```{r}
+DistinctNames %>%
+  mutate(ID_STATUS = ifelse(is.na(Remainder), ID_STATUS, 
+                            ifelse(str_detect(Remainder,     "/") ,  
+                                   "AlternativeNames", ID_STATUS))) -> DistinctNames
+```
+
+
+# Santitizing Names to GBIF
+
+Each of these 5 categories is then handled separately in how they are resolved into accepted taxonomic names. 
+
+```{r}
+DistinctNames %>%
+  distinct( ID_SPECIES, ID_STATUS)%>%
+  count( ID_STATUS)
+```
+
+## "Nice" binomial names 
+
+Where there are no idneified problems, the names from BioTIME are passed directly to the GBIF API. 
+
+```{r}
+DistinctNames %>%
+  filter(  ID_STATUS          =="Not Listed Problem") %>% 
+  mutate(Name2GBIF = paste(  Pt1,Pt2   )) %>%
+  distinct(Name2GBIF) -> NiceNames4GBIF
+```
+
+```{r eval = FALSE}
+### Function to extract top and alternative matches
+
+ExtractNamesFromGbif <-  function(x){
+  cat("\n")
+  cat(x)
+  LS <-  name_backbone_verbose(x)
+  
+  TopMatch <- LS$data
+  TopMatch$submittedname = x
+  TopMatch$matchcategory = "Top"
+  AltMatch <- LS$alternatives
+  AltMatch$matchcategory = "Alternative"
+  AltMatch$submittedname = x
+  return( bind_rows(TopMatch, AltMatch))
+}
+
+## Running over all 22000 odd and saving output as a csv. 
+NiceNames_GBIF<-map_df(NiceNames4GBIF$Name2GBIF,ExtractNamesFromGbif)
+
+write_csv(NiceNames_GBIF, "../NameTables/NiceNames_GBIF.csv")
+```
+
+All returned data is saved, and then filtered to a single best match by the following process:
+- Only keep genus and species level matches 
+- Remove all "Doubtful" Matches
+- If top match is exact, then drop others
+- If any of the alternatives are exact, then drop the others 
+- Where all answers are fuzzy matches, but any are "accepted", then drop the "synonyms" (leaves only a few problem multiples)
+- Then of the remainder, just take the "top" matches, dropping the rest as indeterminate (this process probably misses a few genera IDs, but can"t be sure if good)
+
+```{r}
+NiceNames_GBIF <- read_csv("../NameTables/NiceNames_GBIF.csv")
+
+NiceNames_GBIF %>%
+  count(matchcategory   ,status, matchType   )
+
+NiceNames_GBIF %>%
+  select(submittedname , matchcategory ,matchType      , status, kingdom , rank , canonicalName  , genus ) %>%
+  filter( matchType != "NONE",
+          rank  %in% c("GENUS", "SPECIES"),
+          status    != "DOUBTFUL") %>%
+  mutate( TopExact = matchcategory =="Top" & matchType =="EXACT")%>%
+  group_by(submittedname  )%>%
+  mutate( AnyExact = any(TopExact )) %>%
+  filter( !AnyExact  |   (AnyExact & TopExact) ) %>%
+  group_by(submittedname  ) %>%
+  distinct( submittedname,matchcategory, matchType,status,kingdom ,rank ,   canonicalName    ) %>%
+  add_count()%>%
+  group_by(submittedname  )%>%
+  mutate( AltExact =    matchcategory =="Alternative" & matchType =="EXACT")%>%
+  mutate( AnyAltExact = any(AltExact )) %>%
+  filter( n==1 |    !AnyAltExact  |   (AnyAltExact &AltExact )    ) %>%
+  select(-n) %>%
+  group_by(submittedname  ) %>%
+  add_count() %>%
+  group_by(submittedname  ) %>%
+  mutate(AllFuzzy = all( matchType == "FUZZY"), 
+         AnyAccepted = any( status == "ACCEPTED")) %>%
+  filter( n==1 |!( status   == "SYNONYM" & AllFuzzy & AnyAccepted ))  %>% 
+  select(-n) %>%
+  group_by(submittedname  ) %>%
+  add_count() %>%
+  filter( n==1 |  status == "Top"  ) %>%
+  select(submittedname   , kingdom,
+         rank,canonicalName    ) ->  NiceNames_GBIF_BestMatch
+
+```
+
+## Species not specified cases
+
+Where only an entry in the GENUS feild is present (or the species field was uninformative) just the first part of the name is sent to the GBIF API, except for identified problem labels.
+
+```{r}
+DistinctNames %>%
+  filter(  ID_STATUS=="Sp_Not_Specified") %>% 
+  mutate(Name2GBIF =  Pt1 ) %>%
+  filter( !( Name2GBIF %in% ProblemSpLabels)) %>%
+  distinct(Name2GBIF) -> NotSpecNames4GBIF
+
+```
+
+```{r eval = FALSE}
+## Running over all 4000 odd and saving output as a csv. 
+NotSpecNames_GBIF<-map_df(NotSpecNames4GBIF$Name2GBIF,ExtractNamesFromGbif)
+
+write_csv(NotSpecNames_GBIF, "../NameTables/NotSpecNames_GBIF.csv")
+```
+
+
+The full return was the filterred to a single result by:
+- Only keep genus level matches 
+- Remove all "Doubtful" Matches
+- If top match is exact, then drop others
+- If any of the alternatives are exact, then drop the others 
+
+Then, 
+
+- Where all answers are fuzzy matches, but any are "accepted", then drop the "synonyms" 
+- If there are multiple matches remaining, then don"t accept any of the fuzzy ones. 
+- Where there are multiple exact matches, suggests generic homonymns do a recount, then flag multiples as potential homonymns 
+
+```{R}
+NotSpecNames_GBIF <- read_csv("../NameTables/NotSpecNames_GBIF.csv")
+
+NotSpecNames_GBIF %>%
+  count( rank)
+
+
+NotSpecNames_GBIF %>%
+  filter(matchType != "NONE",
+         rank  ==c("GENUS"),
+         status    != "DOUBTFUL") %>%
+  filter( kingdom != c(  "incertae sedis")) %>%
+  select(submittedname , canonicalName  ,kingdom , genus, matchcategory, matchType , status  ,rank  ) %>%
+  group_by(submittedname  )%>%
+  mutate( TopExact = matchcategory =="Top" & matchType =="EXACT",
+          AnyExact = any(TopExact )) %>%
+  filter( !AnyExact  |   (AnyExact & TopExact) ) %>%
+  group_by(submittedname  ) %>%
+  distinct( submittedname,matchcategory, matchType,status,kingdom ,rank ,   canonicalName    ) %>%
+  add_count()%>%
+  group_by(submittedname  )%>%
+  mutate( AltExact =    matchcategory =="Alternative" & matchType =="EXACT")%>%
+  mutate( AnyAltExact = any(AltExact )) %>%
+  filter( n==1 |    !AnyAltExact  |   (AnyAltExact &AltExact )    ) %>%
+  select(-n) %>%
+  group_by(submittedname  ) %>%
+  add_count() %>%
+  group_by(submittedname  ) %>%
+  mutate(AllFuzzy = all( matchType == "FUZZY"), 
+         AnyAccepted = any( status == "ACCEPTED")) %>%
+  filter( n==1 |!( status   == "SYNONYM" & AllFuzzy & AnyAccepted ))  %>% 
+  select(-n) %>%
+  group_by(submittedname  ) %>%
+  add_count() %>%
+  filter(  n==1 |  (matchType != "FUZZY" & status=="ACCEPTED"  )) %>%
+  select(-n) %>%
+  group_by(submittedname  ) %>%
+  add_count() %>%
+  mutate( Homonym = n>1) %>%
+  group_by(submittedname, canonicalName,  Homonym, rank ) ->GenusLevel_GBIF   
+
+### NB  at this stage still has multiple rows per submitted name, due to homonymns 
+```
+
+### Dealing with homonyms
+
+Due to the taxonomic diversity of BioTIME, homonyms (non-unique binomial names between kingdoms) is a potential problem, particularly where no specific name is available to resolve ambiguities. Largely this was resolved by determining if the assigned kingdom of a GBIF match was different to the rest of the study of otherwise implausible, and some manual cleaning. Lichens, being in some ways "both" plant and fungi casue further issues.. 
+
+```{r}
+
+meta_compact %>%
+  mutate( Marine = str_detect(TAXA ,"Marine") |str_detect(TAXA ,"Benthos" )|
+            str_detect(ORGANISMS,"marine") | str_detect(ORGANISMS,"fish") |
+            str_detect(ORGANISMS,"Fish") | str_detect(ORGANISMS,"sea") ) %>%
+  select(STUDY_ID, TITLE ,  Marine)  -> DomTaxaPerStudy
+
+DistinctNames %>%
+  filter(  ID_STATUS=="Sp_Not_Specified") %>% 
+  mutate(Name2GBIF =  Pt1 ) %>%
+  filter( !( Name2GBIF %in% ProblemSpLabels)) %>%
+  distinct(   STUDY_ID, Pt1) ->STUDY_IDS_Species 
+
+### Use info from study dominants to filter our multiples:
+GenusLevel_GBIF %>%
+  left_join(STUDY_IDS_Species,
+            by = c("submittedname" = "Pt1")) %>%
+  left_join(DomTaxaPerStudy, by = "STUDY_ID") %>%
+  filter(!Homonym |  !(kingdom=="Fungi"  &  Marine)) %>%
+  filter(!Homonym | !(kingdom=="Plantae"  &  Marine)) %>% 
+  filter(!Homonym  |  !( submittedname  %in% c("Salix", "Inga", "Ficus" ,
+                                               "Stellaria", "Trifolium", 
+                                               "Pohlia", "Dryas", "Antennaria",
+                                               "Aglaia", "Casearia", "Eugenia"  )   & kingdom != "Plantae" )    ) %>%
+  ungroup() %>%
+  group_by(submittedname,STUDY_ID) %>% 
+  add_count(name = "NumberHomonyms") -> GenusLevel_GBIF_minusHomonym
+
+# Still a some issues, mostly animal vs benthos difficulties.
+# Also lichen labelled as both plant and fungi... 
+# Will just drop remaining problems at this point
+
+GenusLevel_GBIF_minusHomonym  %>%
+  filter( NumberHomonyms>1) %>%
+  select( submittedname,kingdom, STUDY_ID, TITLE, NumberHomonyms) %>% kableBOX
+
+GenusLevel_GBIF_minusHomonym  %>%
+  filter( NumberHomonyms ==1)%>%
+  select( submittedname,canonicalName, kingdom, rank  ) -> GenusLevel_GBIF_minusHomonym
+
+## Need to be careful  joining these - only where not got a better match, 
+# so need to rejoin to original table (filtered)
+DistinctNames %>%
+  filter(  ID_STATUS=="Sp_Not_Specified") %>%
+  left_join(GenusLevel_GBIF_minusHomonym, 
+            by = c("Pt1" ="submittedname"  ,"STUDY_ID"  ) ) -> GenusLevel_GBIF_uniqued
+```
+
+## Converting common names to binomials
+
+Most common names were directly resolvable using the encyclopedia of life tool. Where there were multiple responses (i.e. the common name is not unique e.g "Rock Wren" resolves as 
+*Salpinctes obsoletus* or *Xenicus gilviventris*) distribution maps were used to manually resolve the binomial, before passing through the GBIF API. Where the GBIF API returned multiiple matches, doubtful matches were excluded, and then if there were still multiples and the top match is exact it is kept. 
+
+
+```{r eval = FALSE}
+PossCommonNames<-filter(DistinctNames,
+                        ID_STATUS == "CommonName", 
+                        Pt1 != "Unidentified" )$OrigBioTimeNames
+EOL_CommonNameReturn<-comm2sci( unique(PossCommonNames) , db = "eol")  
+save(EOL_CommonNameReturn, file = "../NameTables/EOL_CommonNameReturn")
+
+```
+
+```{r}
+load( "../NameTables/EOL_CommonNameReturn")
+orignames<- names(EOL_CommonNameReturn)
+
+NameCompareChart<-  map_df(1:length(orignames),
+                           function(x){ 
+                             FoundNames<-   EOL_CommonNameReturn[[x]]
+                             L_FN <- length(FoundNames)
+                             return(data.frame("FoundNames" = FoundNames,
+                                               "OrigName"  = rep(orignames[x],L_FN)))
+                           })
+
+# Cleaning up the return from the API by filtering out italicisisations, authorities,
+# sub-species and viruses. Where there is just one result, that is kept.
+NameCompareChart %>%
+  filter(!str_detect(FoundNames, "<i>")  ) %>%         # exclude italicisations 
+  filter(!str_detect(FoundNames, "virus")  )%>%        # exclude viruses (!) 
+  separate( FoundNames, into = c("Genus", "species", "junk"), extra = "merge") %>%
+  filter( !is.na(species)) %>%
+  unite(col = "FoundName", Genus, species, sep = " "  )%>%
+  distinct( FoundName,OrigName )%>%
+  add_count(OrigName)%>%
+  arrange(OrigName, n) -> TidyNameCompareChart
+
+
+
+### Ambigouous common names
+TidyNameCompareChart %>%
+  filter(n >1) %>%
+  left_join(bt_grid_collate_filter,
+            by = c("OrigName"="OrigBioTimeNames"  ))%>%
+  distinct(OrigName,FoundName, STUDY_ID )%>%
+  left_join(meta_compact, by = "STUDY_ID") %>%
+  arrange(OrigName,FoundName) %>%
+  select(OrigName,FoundName, TAXA, TITLE    ) -> ambigousCommonNames
+write_csv(ambigousCommonNames, "../NameTables/ambigousCommonNames_4Manual.csv")
+
+
+Manual_Common_Names_Disamb <- read_csv("../NameTables/Manual Common Names Disamb.csv")
+Manual_Common_Names_Disamb %>%
+  filter(Selection == 1)%>%
+  select( OrigName,FoundName     ) %>%
+  bind_rows(  filter(TidyNameCompareChart, n ==1)  ) %>%   # add  Apparently Unambigous CommonNames
+  distinct(OrigName, FoundName) -> CommonNamesConverted
+```
+
+
+```{r eval = FALSE}
+### Getting GBIF for translated names
+
+map_df(CommonNamesConverted$FoundName,
+       function(x){
+         cat("\n")
+         cat(x)
+         LS <-  name_backbone_verbose(x)
+         TopMatch <- LS$data
+         TopMatch$submittedname = x
+         TopMatch$matchcategory = "Top"
+         AltMatch <- LS$alternatives
+         AltMatch$matchcategory = "Alternative"
+         AltMatch$submittedname = x
+         return( bind_rows(TopMatch, AltMatch))
+       })-> VerboseGBIFOUTput_CommonNames
+
+write_csv(VerboseGBIFOUTput_CommonNames,
+          "../NameTables/VerboseGBIFOUTput_CommonNames.csv" )
+```
+
+
+```{R}
+VerboseGBIFOUTput_CommonNames <- read_csv("../NameTables/VerboseGBIFOUTput_CommonNames.csv" )
+
+VerboseGBIFOUTput_CommonNames %>%
+  filter(matchType !="NONE",
+         status    != "DOUBTFUL" ,
+         !(status ==  "SYNONYM" & matchType=="FUZZY" ),
+         !(status ==  "SYNONYM" & matchcategory =="Alternative" ),  # Take out cases where the alternatives are synynonmrs 
+         confidence >50)%>%
+  filter( !is.na(phylum ))%>%
+  left_join(CommonNamesConverted, c( "submittedname"="FoundName")) %>%
+  distinct( submittedname,matchcategory, matchType,status,kingdom ,rank ,   canonicalName   , OrigName ) %>%
+  group_by(submittedname  )%>%
+  add_count()%>%
+  mutate( AnyTopExact =    any(matchcategory =="Top" & matchType =="EXACT"))%>%
+  filter( n==1 |    !(n>1  & AnyTopExact) ) -> CommonNames_GBIF_cut
+```
+
+## Doubled BioTime ID numbers
+
+Those cases where BioTIME ID species does not uniquely match the binomials, these were fixed manually. 
+
+```{r}
+## Names to manually fix
+# DistinctNames%>%
+#   filter(ID_STATUS                =="AlternativeNames"       ) %>%
+#   select(  STUDY_ID, ID_SPECIES ,OrigBioTimeNames ) %>%
+#   left_join( select( meta_compact, STUDY_ID, TITLE)) %>%
+#   arrange(ID_SPECIES) %>%
+#   kableBOX()   
+
+DoubledNames <- read_csv("../NameTables/DoubledNamesInBioTime.csv" ) 
+DoubledNames %>% kableBOX()
+DoubledNames$kingdom = "Plantae" ### All seem to be plants!
+```
+
+# Final Output
+
+The cleaned names from GBIF were then joined to the observation database to produce `bt_grid_collate_filter_tidy.csv`. From this point the cleaned names are used and ID_SPECIES is dropped from further consideration to avoid introducing duplikcations. 
+
+```{r}
+
+AllCleanedNames<-bind_rows( select( CommonNames_GBIF_cut,      canonicalName,rank , 
+                                    kingdom, OrigBioTime =  OrigName ),
+                            select( GenusLevel_GBIF_uniqued,      canonicalName,rank ,  
+                                    kingdom,  OrigBioTime = OrigBioTimeNames  ),
+                            select( NiceNames_GBIF_BestMatch,      canonicalName,rank , 
+                                    kingdom,  OrigBioTime = submittedname),
+                            select( DoubledNames,      canonicalName = FoundName,
+                                    rank ,  kingdom,  OrigBioTime = FoundName)) %>%
+  ungroup()  %>%
+  select( - submittedname)%>%
+  distinct( canonicalName,rank ,  kingdom, OrigBioTime ) %>%
+  filter( !is.na(canonicalName ))
+
+bt_grid_collate_filter %>%
+  left_join(DoubledNames, by = c("STUDY_ID", "ID_SPECIES", "OrigBioTimeNames")) %>%
+  mutate( TidyBTName = ifelse(is.na(kingdom),OrigBioTimeNames ,  FoundName)) %>%
+  select(  STUDY_ID_CELL ,  STUDY_ID , YEAR ,  CrossCellAbundance, 
+           CrossCellBiomass ,ABUNDANCE_TYPE, BIOMASS_TYPE,TidyBTName       ) %>%
+  left_join(AllCleanedNames, c("TidyBTName" = "OrigBioTime"))-> bt_grid_collate_filter_tidy
+
+head(bt_grid_collate_filter_tidy)
+
+
+write_csv(bt_grid_collate_filter_tidy, "../BT_Tables/bt_grid_collate_filter_tidy.csv")
+
+```
+
+

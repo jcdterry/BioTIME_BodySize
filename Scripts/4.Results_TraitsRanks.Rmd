@@ -1,0 +1,1146 @@
+---
+title: "4. Main Results"
+output: 
+  html_document: 
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE)
+```
+
+# Introduction
+
+This script calculates the main results presented in the paper, as well as some additional checks and summary statistics. It takes in the tidy, collated observations and the trait data output from previous scripts. 
+
+NB that `bt_grid_collate_filter_tidy.csv` is too large to store  in the github repository, and is stored at  https://doi.org/10.5281/zenodo.4743590
+
+
+```{r message = FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(corrplot)
+library(broom)
+library(cowplot)
+library(ggrepel)
+library(ggVennDiagram)
+
+kableBOX <- function(df, ...){
+  df %>%
+    kable(...)%>%
+    kable_styling() %>%
+    scroll_box(width = "100%", height = "600px")%>%
+    return()
+}
+
+read_csv('../TraitTables/bt_names_all_traits.csv' ) %>%
+  rowwise %>% 
+  mutate( HasTraits =   !all(is.na(TR_BodyLength_mm),
+                             is.na(TR_QualitativeBodySize),
+                             is.na(TR_Mean_LengthMax),
+                             is.na(TR_adult_body_mass_g), 
+                             is.na(TR_Mean_SeedMass ),
+                             is.na(TR_Max_Height ))) %>%
+  ungroup()-> CompleteTraitTable
+
+bt_grid_collate_filter <-  read_csv('../BT_Tables/bt_grid_collate_filter_tidy.csv',
+                                    col_types = cols(
+                                      STUDY_ID_CELL = col_character(),
+                                      STUDY_ID = col_double(),
+                                      YEAR = col_double(),
+                                      CrossCellAbundance = col_double(),
+                                      CrossCellBiomass = col_double(),
+                                      ABUNDANCE_TYPE = col_character(),
+                                      BIOMASS_TYPE = col_character(),
+                                      TidyBTName = col_character(),
+                                      canonicalName = col_character(),
+                                      rank = col_character(),
+                                      kingdom = col_character())) 
+
+bt_meta <- read_csv("../BT_Tables/BioTIMEMetadata_02_04_2018.csv")
+ 
+ 
+bt_grid_collate_filter %>%
+  left_join(CompleteTraitTable, 
+            by = c('TidyBTName','canonicalName','rank','kingdom')) -> bt_with_traits
+
+
+TraitNames = c("TR_BodyLength_mm","TR_QualBS_Numeric" ,
+               "TR_Mean_LengthMax",   "TR_adult_body_mass_g",
+               "TR_Mean_SeedMass","TR_Max_Height"  )
+
+
+TidyName <- c("TR_BodyLength_mm"="Marine:  Body Length",
+              "TR_QualBS_Numeric" = "Marine: Qualitative Body Size" ,
+              "TR_Mean_LengthMax"= "Fish: Maximum Length", 
+              "TR_adult_body_mass_g"= "Amniotes:Adult body mass",
+              "TR_Mean_SeedMass"="Plants: Seed Mass",
+              "TR_Max_Height"="Plants: Maximum Height"  )
+
+
+```
+
+The completeness of data for each trait for each study was assessed to determine what was usable. Qualitative body size was converted to a numeric scale. 
+
+```{r message = FALSE}
+# which traits for which study?
+
+bt_with_traits %>% 
+  group_by(STUDY_ID) %>%
+  summarise(across(  starts_with('TR_'),    ~ mean(!is.na(.x))))-> Study_level_TC
+
+
+bt_with_traits %>% 
+  group_by(STUDY_ID_CELL) %>%
+  summarise(across(  starts_with('TR_'),    ~ mean(!is.na(.x)),
+                     .names =  "Comp_{.col}"))%>%
+  mutate( Best_Completeness = pmax(Comp_TR_BodyLength_mm,Comp_TR_QualitativeBodySize,
+                                   Comp_TR_Mean_LengthMax, Comp_TR_adult_body_mass_g,
+                                   Comp_TR_Mean_SeedMass, Comp_TR_Max_Height)) %>%
+  ungroup()-> StudyCell_level_TC
+
+# Study_level_TC %>%
+#   gather('Trait', 'Completeness',-STUDY_ID) %>%
+#   filter( Completeness>0) %>%
+#   ggplot(aes(Completeness, x = Trait))+
+#   geom_boxplot()
+
+
+## Set qualitative levels in order as a factor, then convert to a numeric
+bt_with_traits$TR_QualitativeBodySize <- factor(bt_with_traits$TR_QualitativeBodySize ,
+                                                levels = c(  "<0.2 mm"  ,  "0.2 - 2.0 mm", "2.0 - 200 mm",    ">200 mm"     ))
+
+bt_with_traits$TR_QualBS_Numeric <- as.numeric(bt_with_traits$TR_QualitativeBodySize) 
+
+```
+
+# Finding correlation between traits and community shifts
+
+## Categories of data
+
+BioTIME includes a mixture of abundance and biomass data. Only one category was used for each study. Since count data is the most frequent, it was prioritised wen both categories of data were present. Presence/Absence data (28 studies) is not used.  
+
+```{r}
+bt_meta %>%
+  count(ABUNDANCE_TYPE , BIOMASS_TYPE ) %>%
+  kable()
+```
+
+## Calculation of $\tau$
+The approach to calculate the rank correlation between rank abundance changes and traits is set out in document (5) and R functions are stored in `RankCorrFuncs.R`. The function was applied for all trait/study/cell combinations where fraction of species with trait data was above 30%, and the best study/trait completeness was above 40%. The 40% threshold was rapplied later, but was lowered at these earlier analysis stages to investigate if the choice was influential.  
+
+```{r warning = FALSE}
+source( '../Scripts/RankCorrFuncs.R')
+## Tester:
+# FindTrait_Rank_Cor( StudyCell ='10_359170', all_df = bt_with_traits, trait =  "TR_Mean_SeedMass")
+```
+
+```{r}
+## Abundance data
+StudyCell_level_TC %>%
+  separate(STUDY_ID_CELL , into = c('STUDY_ID', 'Cell' ), remove = FALSE, convert = TRUE) %>%
+  left_join(bt_meta, by = "STUDY_ID") %>%
+  filter( Best_Completeness >0.4) %>%
+  filter( ABUNDANCE_TYPE    %in% c('Count', 'Density', 'MeanCount' )) -> StudyCells_Filt_Abund
+```
+
+```{r eval = FALSE}
+
+CompletenessCutoff = 0.3 # NB Will run tests with a lower completness cutoff, and will look at effect of completness on tau down the line. 
+
+### fish = Body_length_mm 
+WhichStudys<-StudyCells_Filt_Abund$STUDY_ID_CELL[StudyCells_Filt_Abund$Comp_TR_BodyLength_mm >CompletenessCutoff] 
+CORR_BodyLength_mm<- map_df(WhichStudys, FindTrait_Rank_Cor, all_df = bt_with_traits, trait =  'TR_BodyLength_mm')
+
+###
+WhichStudys<-StudyCells_Filt_Abund$STUDY_ID_CELL[StudyCells_Filt_Abund$Comp_TR_QualitativeBodySize  >CompletenessCutoff] 
+CORR_QualitativeBodySize <- map_df(WhichStudys, FindTrait_Rank_Cor, all_df = bt_with_traits, trait =  'TR_QualBS_Numeric')
+## nb when all are in the same category, will give an NA out
+
+WhichStudys<-StudyCells_Filt_Abund$STUDY_ID_CELL[StudyCells_Filt_Abund$Comp_TR_Mean_LengthMax >CompletenessCutoff] 
+CORR_Mean_LengthMax<- map_df(WhichStudys, FindTrait_Rank_Cor, all_df = bt_with_traits, trait =  'TR_Mean_LengthMax')
+
+WhichStudys<-StudyCells_Filt_Abund$STUDY_ID_CELL[StudyCells_Filt_Abund$Comp_TR_adult_body_mass_g >CompletenessCutoff] 
+CORR_adult_body_mass_g<- map_df(WhichStudys, FindTrait_Rank_Cor, all_df = bt_with_traits, trait =  'TR_adult_body_mass_g')
+
+WhichStudys<-StudyCells_Filt_Abund$STUDY_ID_CELL[StudyCells_Filt_Abund$Comp_TR_Mean_SeedMass >CompletenessCutoff] 
+CORR_Mean_SeedMass<- map_df(WhichStudys, FindTrait_Rank_Cor, all_df = bt_with_traits, trait =  'TR_Mean_SeedMass')
+
+WhichStudys<-StudyCells_Filt_Abund$STUDY_ID_CELL[StudyCells_Filt_Abund$Comp_TR_Max_Height >CompletenessCutoff] 
+CORR_Max_Height<- map_df(WhichStudys, FindTrait_Rank_Cor, all_df = bt_with_traits, trait =  'TR_Max_Height')
+
+
+CORR_All <- bind_rows(CORR_BodyLength_mm, CORR_QualitativeBodySize, CORR_Mean_LengthMax,
+                      CORR_adult_body_mass_g,CORR_Mean_SeedMass,  CORR_Max_Height )
+
+
+write_csv( CORR_All, '../Results/CORR_All.csv')
+
+```
+
+```{R}
+## Biomass data
+
+StudyCell_level_TC %>%
+  separate(STUDY_ID_CELL , into = c('STUDY_ID', 'Cell' ), remove = FALSE, convert = TRUE) %>%
+  left_join(bt_meta, by = "STUDY_ID") %>%
+  filter( Best_Completeness >0.4) %>%
+  filter(is.na(ABUNDANCE_TYPE) )  -> StudyCells_Filt_BIOMASS
+
+```
+
+```{r eval = FALSE}
+CompletenessCutoff = 0.3
+
+### fish = Body_length_mm 
+WhichStudys<-StudyCells_Filt_BIOMASS$STUDY_ID_CELL[StudyCells_Filt_BIOMASS$Comp_TR_BodyLength_mm >CompletenessCutoff] 
+biomasss_CORR_BodyLength_mm<- map_df(WhichStudys, FindTrait_Rank_Cor, all_df = bt_with_traits, 
+                                     trait =  'TR_BodyLength_mm', response = 'Biomass')
+
+WhichStudys<-StudyCells_Filt_BIOMASS$STUDY_ID_CELL[StudyCells_Filt_BIOMASS$Comp_TR_QualitativeBodySize  >CompletenessCutoff] 
+biomasss_CORR_QualitativeBodySize <- map_df(WhichStudys, FindTrait_Rank_Cor, all_df = bt_with_traits,
+                                            trait =  'TR_QualBS_Numeric', response = 'Biomass')
+
+WhichStudys<-StudyCells_Filt_BIOMASS$STUDY_ID_CELL[StudyCells_Filt_BIOMASS$Comp_TR_Mean_LengthMax >CompletenessCutoff] 
+biomasss_CORR_Mean_LengthMax<- map_df(WhichStudys, FindTrait_Rank_Cor, all_df = bt_with_traits,
+                                      trait =  'TR_Mean_LengthMax', response = 'Biomass')
+
+WhichStudys<-StudyCells_Filt_BIOMASS$STUDY_ID_CELL[StudyCells_Filt_BIOMASS$Comp_TR_adult_body_mass_g >CompletenessCutoff] 
+biomasss_CORR_adult_body_mass_g<- map_df(WhichStudys, FindTrait_Rank_Cor, all_df = bt_with_traits,
+                                         trait =  'TR_adult_body_mass_g', response = 'Biomass')
+
+WhichStudys<-StudyCells_Filt_BIOMASS$STUDY_ID_CELL[StudyCells_Filt_BIOMASS$Comp_TR_Mean_SeedMass >CompletenessCutoff] 
+biomasss_CORR_Mean_SeedMass<- map_df(WhichStudys, FindTrait_Rank_Cor, all_df = bt_with_traits,
+                                     trait =  'TR_Mean_SeedMass', response = 'Biomass')
+
+WhichStudys<-StudyCells_Filt_BIOMASS$STUDY_ID_CELL[StudyCells_Filt_BIOMASS$Comp_TR_Max_Height >CompletenessCutoff] 
+biomasss_CORR_Max_Height<- map_df(WhichStudys, FindTrait_Rank_Cor, all_df = bt_with_traits,
+                                  trait =  'TR_Max_Height', response = 'Biomass')
+
+
+biomasss_CORR_All <- bind_rows(biomasss_CORR_BodyLength_mm, biomasss_CORR_QualitativeBodySize,
+                               biomasss_CORR_Mean_LengthMax, biomasss_CORR_adult_body_mass_g,
+                               biomasss_CORR_Mean_SeedMass,  biomasss_CORR_Max_Height )
+
+write_csv( biomasss_CORR_All, '../Results/biomasss_CORR_All.csv')
+
+```
+
+## Randomisation tests
+
+To generate a null distribution of expected $\tau$ values given no trait effects, the analysis was repeated 100 times, where each time the trait values within each trait/study/cell combination were randomised. 
+
+```{r eval = FALSE}
+## Abundances
+CompletenessCutoff = 0.3
+N_REPS = 100
+
+### fish = Body_length_mm 
+WhichStudys<-StudyCells_Filt_Abund$STUDY_ID_CELL[StudyCells_Filt_Abund$Comp_TR_BodyLength_mm >CompletenessCutoff] 
+RAND_CORR_BodyLength_mm<- map_df(WhichStudys, FindTrait_Rank_Cor_RANDOMISE,
+                                 all_df = bt_with_traits, trait =  'TR_BodyLength_mm', N_REPS=N_REPS)
+
+###
+WhichStudys<-StudyCells_Filt_Abund$STUDY_ID_CELL[StudyCells_Filt_Abund$Comp_TR_QualitativeBodySize  >CompletenessCutoff] 
+RAND_CORR_QualitativeBodySize <- map_df(WhichStudys, FindTrait_Rank_Cor_RANDOMISE,
+                                        all_df = bt_with_traits, trait =  'TR_QualBS_Numeric', N_REPS=N_REPS)
+## nb when all are in the same category, will give an NA out
+
+WhichStudys<-StudyCells_Filt_Abund$STUDY_ID_CELL[StudyCells_Filt_Abund$Comp_TR_Mean_LengthMax >CompletenessCutoff] 
+RAND_CORR_Mean_LengthMax<- map_df(WhichStudys, FindTrait_Rank_Cor_RANDOMISE,
+                                  all_df = bt_with_traits, trait =  'TR_Mean_LengthMax', N_REPS=N_REPS)
+
+WhichStudys<-StudyCells_Filt_Abund$STUDY_ID_CELL[StudyCells_Filt_Abund$Comp_TR_adult_body_mass_g >CompletenessCutoff] 
+RAND_CORR_adult_body_mass_g<- map_df(WhichStudys, FindTrait_Rank_Cor_RANDOMISE,
+                                     all_df = bt_with_traits, trait =  'TR_adult_body_mass_g', N_REPS=N_REPS)
+
+WhichStudys<-StudyCells_Filt_Abund$STUDY_ID_CELL[StudyCells_Filt_Abund$Comp_TR_Mean_SeedMass >CompletenessCutoff] 
+RAND_CORR_Mean_SeedMass<- map_df(WhichStudys, FindTrait_Rank_Cor_RANDOMISE,
+                                 all_df = bt_with_traits, trait =  'TR_Mean_SeedMass', N_REPS=N_REPS)
+
+WhichStudys<-StudyCells_Filt_Abund$STUDY_ID_CELL[StudyCells_Filt_Abund$Comp_TR_Max_Height >CompletenessCutoff] 
+RAND_CORR_Max_Height<- map_df(WhichStudys, FindTrait_Rank_Cor_RANDOMISE,
+                              all_df = bt_with_traits, trait =  'TR_Max_Height', N_REPS=N_REPS)
+
+
+RAND_CORR_All <- bind_rows(RAND_CORR_BodyLength_mm,
+                           RAND_CORR_QualitativeBodySize,
+                           RAND_CORR_Mean_LengthMax,
+                           RAND_CORR_adult_body_mass_g,
+                           RAND_CORR_Mean_SeedMass,  
+                           RAND_CORR_Max_Height )
+
+write_csv( RAND_CORR_All, '../Results/abund_RAND_CORR_All100.csv')
+
+```
+
+```{r eval = FALSE}
+## Biomasses
+CompletenessCutoff = 0.3
+
+N_REPS = 100
+
+
+### fish = Body_length_mm 
+WhichStudys<-StudyCells_Filt_BIOMASS$STUDY_ID_CELL[StudyCells_Filt_BIOMASS$Comp_TR_BodyLength_mm >CompletenessCutoff] 
+biomasss_RAND_CORR_BodyLength_mm<- map_df(WhichStudys, FindTrait_Rank_Cor_RANDOMISE, 
+                                          all_df = bt_with_traits, trait =  'TR_BodyLength_mm', response = 'Biomass', N_REPS=N_REPS)
+
+###
+WhichStudys<-StudyCells_Filt_BIOMASS$STUDY_ID_CELL[StudyCells_Filt_BIOMASS$Comp_TR_QualitativeBodySize  >CompletenessCutoff] 
+biomasss_RAND_CORR_QualitativeBodySize <- map_df(WhichStudys, FindTrait_Rank_Cor_RANDOMISE, 
+                                                 all_df = bt_with_traits, trait =  'TR_QualBS_Numeric', response = 'Biomass', N_REPS=N_REPS)
+## nb when all are in the same category, will give an NA out
+
+WhichStudys<-StudyCells_Filt_BIOMASS$STUDY_ID_CELL[StudyCells_Filt_BIOMASS$Comp_TR_Mean_LengthMax >CompletenessCutoff] 
+biomasss_RAND_CORR_Mean_LengthMax<- map_df(WhichStudys, FindTrait_Rank_Cor_RANDOMISE,
+                                           all_df = bt_with_traits, trait =  'TR_Mean_LengthMax', response = 'Biomass', N_REPS=N_REPS)
+
+WhichStudys<-StudyCells_Filt_BIOMASS$STUDY_ID_CELL[StudyCells_Filt_BIOMASS$Comp_TR_adult_body_mass_g >CompletenessCutoff] 
+biomasss_RAND_CORR_adult_body_mass_g<- map_df(WhichStudys, FindTrait_Rank_Cor_RANDOMISE,
+                                              all_df = bt_with_traits, trait =  'TR_adult_body_mass_g', response = 'Biomass', N_REPS=N_REPS)
+
+WhichStudys<-StudyCells_Filt_BIOMASS$STUDY_ID_CELL[StudyCells_Filt_BIOMASS$Comp_TR_Mean_SeedMass >CompletenessCutoff] 
+biomasss_RAND_CORR_Mean_SeedMass<- map_df(WhichStudys, FindTrait_Rank_Cor_RANDOMISE,
+                                          all_df = bt_with_traits, trait =  'TR_Mean_SeedMass', response = 'Biomass', N_REPS=N_REPS)
+
+WhichStudys<-StudyCells_Filt_BIOMASS$STUDY_ID_CELL[StudyCells_Filt_BIOMASS$Comp_TR_Max_Height >CompletenessCutoff] 
+biomasss_RAND_CORR_Max_Height<- map_df(WhichStudys, FindTrait_Rank_Cor_RANDOMISE, 
+                                       all_df = bt_with_traits, trait =  'TR_Max_Height', response = 'Biomass', N_REPS=N_REPS)
+
+
+biomasss_RAND_CORR_All <- bind_rows(biomasss_RAND_CORR_BodyLength_mm,
+                                    biomasss_RAND_CORR_QualitativeBodySize,
+                                    biomasss_RAND_CORR_Mean_LengthMax,
+                                    biomasss_RAND_CORR_adult_body_mass_g,
+                                    biomasss_RAND_CORR_Mean_SeedMass,  
+                                    biomasss_RAND_CORR_Max_Height )
+
+
+write_csv( biomasss_RAND_CORR_All, '../Results/biomasss_RAND_CORR_All100.csv')
+
+```
+
+```{r message = FALSE, eval = FALSE}
+### Full randomsiations are too large for upload, so will just save the study-level means (rather than the assembly level)
+
+RAND_CORR_abund   <- read_csv('../Results/abund_RAND_CORR_All100.csv')
+RAND_CORR_biomass <- read_csv('../Results/biomasss_RAND_CORR_All100.csv')
+
+RAND_CORR_All <- bind_rows(RAND_CORR_abund, RAND_CORR_biomass)
+
+RAND_CORR_All  %>%
+  left_join(StudyCell_level_TC, by = "STUDY_ID_CELL")%>%
+  mutate(TraitNum =  recode(trait, 
+                            "TR_BodyLength_mm" = 1,
+                            "TR_QualBS_Numeric" =2,
+                            "TR_Mean_LengthMax"=3,  
+                            "TR_adult_body_mass_g"=4,
+                            "TR_Mean_SeedMass"=5,
+                            "TR_Max_Height"=6    ))  -> RAND_CORR_All_comp
+
+## Use trait number to pull out the trait completeness of the trait sued in each trial
+RAND_CORR_All_comp$Trait_Completeness_Cell <-as.matrix(RAND_CORR_All_comp[, 5:10])[matrix(c(1:nrow(RAND_CORR_All_comp), RAND_CORR_All_comp$TraitNum), ncol = 2 )]
+
+RAND_CORR_All_comp %>%
+  filter(Trait_Completeness_Cell >=0.4) %>%
+  filter( !is.na( tau_rand)) %>% ## remove the NAs (occur when all qualitative body sizes are the same)
+  separate(STUDY_ID_CELL , into = c('STUDY_ID', 'Cell' ), remove = FALSE, convert = TRUE) %>%
+  group_by(Rep, STUDY_ID, trait) %>%
+  summarise(Mean_kendall_cor  = mean(tau_rand   )) -> Mean_RAND_CORR_All
+
+write_csv( Mean_RAND_CORR_All, '../Results/Mean_RAND_CORR_All.csv')
+
+```
+
+
+# Assessing overall mean value of  $\tau$.
+
+## Checks and data wrangling
+```{r message = FALSE}
+abundanceCORR_All <- read_csv( '../Results/CORR_All.csv')
+biomasss_CORR_All <- read_csv('../Results/biomasss_CORR_All.csv')
+
+CORR_All <- bind_rows( biomasss_CORR_All, abundanceCORR_All)
+
+StudyCells_Filt <- bind_rows(StudyCells_Filt_Abund, StudyCells_Filt_BIOMASS)
+
+```
+
+For the multi-site (ML) studies, results from across cells were averaged to give single study/trait results. Summaries across all cells are shown in the figure. Most of the multi-cell studies look to be relatively normally distributed within each study, justifying taking simple averages. 
+
+```{r fig.height=12}
+## Calculating summary statistics for each trait/study/cell
+bt_with_traits %>% 
+  group_by(STUDY_ID_CELL) %>%
+  summarise(SpDiversity = n_distinct( TidyBTName ),
+            N_Years = n_distinct( YEAR ),
+            YearRange = diff(range( YEAR ))) -> StudyCellStats
+
+CORR_All %>%
+  mutate(TraitNum =  recode(trait, 
+                            "TR_BodyLength_mm" = 1,
+                            "TR_QualBS_Numeric" =2,
+                            "TR_Mean_LengthMax"=3,  
+                            "TR_adult_body_mass_g"=4,
+                            "TR_Mean_SeedMass"=5,
+                            "TR_Max_Height"=6    )) %>% 
+  left_join(StudyCell_level_TC, by = "STUDY_ID_CELL") -> CORR_All_1
+
+## Use trait number to pull out the trait completeness of the trait sued in each trial
+CORR_All_1$Trait_Completeness_Cell <-as.matrix(CORR_All_1[, 5:10])[matrix(c(1:nrow(CORR_All_1), CORR_All_1$TraitNum), ncol = 2 )]
+
+CORR_All_1 %>%
+  select( trait,STUDY_ID_CELL, kendall_cor ,TraitNum ,Trait_Completeness_Cell ) %>%
+  separate(STUDY_ID_CELL , into = c('STUDY_ID', 'Cell' ), remove = FALSE, convert = TRUE) %>%
+  left_join(StudyCellStats, by = "STUDY_ID_CELL")  %>%
+  group_by(STUDY_ID, trait) %>%
+  mutate( N_Cell = n_distinct(STUDY_ID_CELL) )-> Corr_Predictors
+
+
+Corr_Predictors %>%
+  mutate( trait = recode(trait , "TR_BodyLength_mm"="Marine:  Body Length",
+                         "TR_QualBS_Numeric" = "Marine: Qualitative Body Size" ,
+                         "TR_Mean_LengthMax"= "Fish: Maximum Length", 
+                         "TR_adult_body_mass_g"= "Amniotes:Adult body mass",
+                         "TR_Mean_SeedMass"="Plants: Seed Mass",
+                         "TR_Max_Height"="Plants: Maximum Height"  )) %>%
+  ggplot( aes( y=kendall_cor,  x = as.factor(STUDY_ID), col = log10(N_Cell)))+
+  geom_boxplot()+
+  theme_classic()+
+  theme(legend.position="bottom",
+        axis.text.x = element_text(angle = 90))+
+  xlab('Study ID')+
+  ylab('Tau')+
+  facet_wrap(~trait,scales = 'free', ncol = 1)
+```
+
+```{r}
+Corr_Predictors %>%
+  filter(Trait_Completeness_Cell >=0.4,
+         !is.na( kendall_cor)) %>% ## remove the NAs (occur when all qualitiative body sizes are the same)
+  group_by(STUDY_ID, trait) %>%
+  summarise(Mean_kendall_cor  = mean(kendall_cor  ) ,
+            Mean_Sp_div = mean(SpDiversity ) ,
+            Mean_N_Years = mean(N_Years),
+            Mean_Completeness = mean(Trait_Completeness_Cell),
+            Mean_YearRange = mean(YearRange  ),
+            Cells = mean(N_Cell)) %>%
+  ungroup()%>%
+  left_join(select(bt_meta, STUDY_ID  ,TITLE , REALM,  CLIMATE,PROTECTED_AREA ,
+                   GRAIN_SQ_KM  ,ABUNDANCE_TYPE, BIOMASS_TYPE ,CENT_LAT ,CENT_LONG ),
+            by = "STUDY_ID") %>%
+  mutate( LogCells = log10(Cells),
+          GRAIN_SQ_KM = log10(GRAIN_SQ_KM))-> Study_Corr_Predictors
+
+```
+Even including the cells with 30-40% trait completeness, the multi-cell studies don't seem to show a strong relationship between completeness and $\tau$. Nonetheless,  the 40% pre-determined cutoff was retained and used for downstream analyses.  
+
+```{r message = FALSE, wanring = FALSE}
+Corr_Predictors %>%
+  filter( N_Cell >1) %>%
+  ggplot( aes( Trait_Completeness_Cell ,kendall_cor , group = as.factor(STUDY_ID )))+
+  geom_point()+
+  geom_smooth( method = 'lm', se = FALSE)+
+  theme_classic()
+```
+
+## t-tests for difference compared to randomisations
+```{r}
+
+Mean_RAND_CORR_All <- read_csv('../Results/Mean_RAND_CORR_All.csv')
+
+
+
+RunTT <- function(i){  t.test( x=   filter( Study_Corr_Predictors, trait == TraitNames[i])$Mean_kendall_cor,
+               y= filter( Mean_RAND_CORR_All, trait == TraitNames[i])$Mean_kendall_cor,
+               alternative ="two.sided", mu = 0 ) %>%
+    tidy %>%
+    mutate(Trait = TidyName[i],
+           'Sample Size' = nrow(filter(Study_Corr_Predictors, trait ==TraitNames[i])) )}
+
+map_df( 1:6, RunTT) %>%
+  select(  Trait, 
+           'Estimated Difference'= estimate , 
+           'Lower CI' =  conf.low ,
+            'Upper CI' = conf.high ,
+            'Estimated Mean (Observed)' = estimate1 ,
+            'Estimated Mean (Null)' = estimate2 , 
+            't-statistic' = statistic ,
+            'p-value' = p.value,
+            'Effective Degrees of Freedom' = parameter,
+           'Sample Size') -> ttestsFull
+
+
+SampleSizes <- Study_Corr_Predictors %>%
+  count( trait)
+
+
+ttestsFull%>% 
+  kable(digits = 4)
+
+write_csv(ttestsFull , '../SIdata/T_tests.csv')
+```
+
+For comparison, a one sample t-test gives basically the same significance (as expected, given the change in the DF with the Welch adjustment is marginal)
+
+```{r}
+## 1 sided t-ttest
+
+
+RunTT1 <- function(i){  t.test( x=   filter( Study_Corr_Predictors, trait == TraitNames[i])$Mean_kendall_cor,
+               alternative ="two.sided", mu = 0 ) %>%
+    tidy %>%
+    mutate(Trait = TidyName[i],
+           'Sample Size' = nrow(filter(Study_Corr_Predictors, trait ==TraitNames[i])) )}
+
+map_df( 1:6, RunTT1) %>% kable
+
+```
+
+## Dot-plot histograms
+
+```{r message = FALSE}
+PlotList <- list()
+
+for( i in 1:6){
+  
+  TRAIT = c("TR_BodyLength_mm","TR_QualBS_Numeric" ,
+            "TR_Mean_LengthMax",   "TR_adult_body_mass_g",
+            "TR_Mean_SeedMass","TR_Max_Height"  )[i]
+  
+  name = c("a) Marine: Body length",
+           "b) Marine: Qualitative body size" ,
+           "c) Fish: Maximum length",  
+           "d) Amniotes: Adult body mass",
+           "e) Plants: Seed mass",
+           "f) Plants: Maximum height"  )[i]
+  
+  
+  ## Stats test to add
+  
+  TT<- RunTT(i)
+  
+  
+  stats_dets<-paste0('Mean: ', signif(TT$estimate1, 2),  
+                     ', n: ',    nrow(filter(Study_Corr_Predictors, trait ==TRAIT)),
+        ',\nt: ' ,      signif(TT$statistic, 3),
+        ', p: ' ,      signif(TT$p.value,2)  , ifelse(TT$p.value<0.05, '*' , ''))
+  
+  
+  Study_Corr_Predictors%>%
+    filter(trait ==TRAIT) %>%
+    ggplot( aes(Mean_kendall_cor))+
+    geom_dotplot(binwidth = 0.05, binpositions = 'all', method = 'histodot', origin = -0.55,alpha = 0.7)+ 
+    theme(panel.background = element_blank(),
+          axis.text = element_blank(),
+          axis.title.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.title.x  = element_blank())+
+    geom_vline( xintercept = 0)+
+    ggtitle( name, 
+             subtitle = stats_dets)+
+    scale_x_continuous(limits= c(-0.55, 0.55)) +
+    coord_cartesian(clip = 'off')-> XX_dots
+  
+  filter(Mean_RAND_CORR_All,trait ==TRAIT) %>%
+    ggplot( aes(x=Mean_kendall_cor))+
+    theme(axis.text.y = element_blank(),
+          axis.title.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          panel.background = element_blank())+
+    geom_density(fill = 'skyblue')+
+    xlab(expression(tau))+
+    coord_cartesian(xlim= c(-0.55, 0.55), ylim = c(NA,0.01))+
+    scale_y_reverse()-> XX_dens
+  
+  
+  PlotList[[i]] <-   plot_grid(XX_dots, XX_dens, ncol = 1 , rel_heights = c( 3,1), align = 'v')
+}
+
+
+DotPlots<-cowplot::plot_grid(PlotList[[1]],PlotList[[2]],
+                             PlotList[[3]],PlotList[[4]],
+                             PlotList[[5]],PlotList[[6]])
+
+DotPlots
+ggsave('../Plots/DotPlots.png', DotPlots,width = 10, height = 7)
+ggsave('../Plots/DotPlots.pdf', DotPlots,width = 10, height = 7)
+
+```
+
+
+```{R}
+## Comparison of variances between observed and null
+left_join(Study_Corr_Predictors %>%
+            ungroup() %>%
+            group_by( trait) %>%
+            summarise( VAR_obs = var( Mean_kendall_cor)),
+          Mean_RAND_CORR_All %>%
+            ungroup() %>%
+            group_by( trait) %>%
+            summarise( VAR_rand = var( Mean_kendall_cor)),
+          by = "trait") %>%
+  kable()
+
+```
+
+
+# Study level predictors of tau
+
+A suite of potential drivers, 'statistical' and 'ecological' were generated for each trait/study combination. Generally these were the mean value of all constituent cells for the ML studies, rather than grand totals. These were:
+
+- Species richness
+- Number of years sampled
+- Year Range (i.e time span of the time series) 
+- Trait Completeness (fraction of species with trait data)
+- Number of cells 
+
+As well as additional values from the original BioTIME metadata
+
+- Study grain ( log10 km^2)
+- Latitude (absolute)
+- Protected area status (as listed in BioTIME)
+
+The correlations between these putative drivers are shown in Figure XX and the relationships with $\tau$ are shown in Figure XXX. Linear models of these predcitors (except study grain due to NA's)
+
+
+
+```{r }
+Study_Corr_Predictors %>%
+  select(Mean_Sp_div  : Cells  ,  GRAIN_SQ_KM , CENT_LAT  ) %>%
+  mutate( Abs_Lat= abs(CENT_LAT)) %>%
+  rename('Absolute Latitude' = Abs_Lat,
+         'Sampling Grain'   = 'GRAIN_SQ_KM' ,
+         'Year Range'='Mean_YearRange' ,
+         'Trait Completeness'="Mean_Completeness",
+         'Years Sampled'="Mean_N_Years" ,
+         'Species Richness'="Mean_Sp_div",
+         'Number of Cells'="Cells" ) %>%
+  select( -CENT_LAT) %>%
+  as.matrix() %>%
+  cor(method = 'spearman') %>%
+  corrplot(diag = FALSE)
+```
+
+
+```{r}
+
+Study_Corr_Predictors %>%
+  gather( 'predictor', 'value', Mean_Sp_div : Mean_YearRange, LogCells, PROTECTED_AREA , GRAIN_SQ_KM , CENT_LAT   ) %>% 
+  select(  Mean_kendall_cor, predictor, value, trait) %>%
+  mutate( trait = recode(trait , "TR_BodyLength_mm"="Marine:  Body Length",
+                         "TR_QualBS_Numeric" = "Marine: Qualitative Body Size" ,
+                         "TR_Mean_LengthMax"= "Fish: Maximum Length", 
+                         "TR_adult_body_mass_g"= "Amniotes:Adult body mass",
+                         "TR_Mean_SeedMass"="Plants: Seed Mass",
+                         "TR_Max_Height"="Plants: Maximum Height"  )) %>%
+  mutate( predictor = recode(predictor ,
+                             'CENT_LAT' =  'Latitude',
+                             'GRAIN_SQ_KM' = 'Sampling Grain (log10)',
+                             'Mean_YearRange' = 'Year Range',
+                             "Mean_Completeness"='Trait Completeness',
+                             "Mean_N_Years" =   'Years Sampled' ,
+                             "Mean_Sp_div"= 'Species Richness',
+                             "LogCells"= 'Number of Cells (log10)',
+                             "PROTECTED_AREA"="Protected Area "  )) %>%
+  ggplot(aes(value,Mean_kendall_cor))+
+  geom_point()+
+  ylab('tau')+
+  xlab('Predictor Value')+
+  facet_grid(trait ~predictor,scales = 'free_x') -> TauPredictorsPlot
+
+ggsave('../Plots/TauPredictorsPlot.png', TauPredictorsPlot, width = 14, height =11)
+
+```
+
+### Fitting models
+
+```{r}
+
+
+Pred_Labels <-  c('Intercept', 'Species Richness', 'Trait Completeness' , 
+                                  'Years Sampled', 'Year Range', 'Number of Cells Log_10', 'Absolute Latitude' )
+
+
+FF <- Mean_kendall_cor~  Mean_Sp_div +Mean_Completeness+ Mean_N_Years+ Mean_YearRange +LogCells  + abs(CENT_LAT)
+
+
+M1 <- lm(FF,   data = filter(Study_Corr_Predictors,  trait == TraitNames[1], !is.na( Mean_kendall_cor)) ) 
+M2 <- lm(FF,   data = filter(Study_Corr_Predictors,  trait == TraitNames[2], !is.na( Mean_kendall_cor)) ) 
+M3 <- lm(FF,   data = filter(Study_Corr_Predictors,  trait == TraitNames[3], !is.na( Mean_kendall_cor)) ) 
+M4 <- lm(FF,   data = filter(Study_Corr_Predictors,  trait == TraitNames[4], !is.na( Mean_kendall_cor)) ) 
+M5 <- lm(FF,   data = filter(Study_Corr_Predictors,  trait == TraitNames[5], !is.na( Mean_kendall_cor)) ) 
+M6 <- lm(FF,   data = filter(Study_Corr_Predictors,  trait == TraitNames[6], !is.na( Mean_kendall_cor)) ) 
+
+
+TableS2<- sjPlot::tab_model(M1, M2, M3, M4, M5, M6, title = 'Predictors for τ with each trait',
+                  pred.labels =Pred_Labels,
+                  show.ci = FALSE, 
+                  dv.labels  =TidyName, digits = 4) 
+TableS2
+
+FF2 <- Mean_kendall_cor^2~  Mean_Sp_div +Mean_Completeness+ Mean_N_Years+ Mean_YearRange +LogCells  + abs(CENT_LAT)
+
+
+M1_2 <- lm(FF2,   data = filter(Study_Corr_Predictors,  trait == TraitNames[1], !is.na( Mean_kendall_cor)) ) 
+M2_2 <- lm(FF2,   data = filter(Study_Corr_Predictors,  trait == TraitNames[2], !is.na( Mean_kendall_cor)) ) 
+M3_2 <- lm(FF2,   data = filter(Study_Corr_Predictors,  trait == TraitNames[3], !is.na( Mean_kendall_cor)) ) 
+M4_2 <- lm(FF2,   data = filter(Study_Corr_Predictors,  trait == TraitNames[4], !is.na( Mean_kendall_cor)) ) 
+M5_2 <- lm(FF2,   data = filter(Study_Corr_Predictors,  trait == TraitNames[5], !is.na( Mean_kendall_cor)) ) 
+M6_2 <- lm(FF2,   data = filter(Study_Corr_Predictors,  trait == TraitNames[6], !is.na( Mean_kendall_cor)) ) 
+
+
+TableS3<-sjPlot::tab_model(M1_2, M2_2, M3_2, M4_2, M5_2, M6_2, title = 'Predictors for τ squared with each trait',
+                  pred.labels = Pred_Labels,
+                  show.ci = FALSE, 
+                  dv.labels  =TidyName, digits = 4) 
+
+TableS3
+
+```
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+## Building DF to use in extended data generator (sjPLOT doesn't work well with pdfs...)
+
+N_Obs <- map_dbl(1:6,
+                 function(i){nrow(filter(Study_Corr_Predictors, 
+                                         trait == TraitNames[i], 
+                                         !is.na( Mean_kendall_cor)))} )
+
+N_Obs_vec <- c( 'Observations', N_Obs[1], '',N_Obs[2], '',N_Obs[3], '',N_Obs[4], '',N_Obs[5], '',N_Obs[6], '')
+
+
+TableS2_df <- bind_cols(Pred_Labels, 
+                        signif(map_dfc( list(M1, M2, M3, M4, M5, M6),
+                                              function(M){select( tidy(M), estimate, p.value ) }),
+                               3))
+
+R2_adj =  map_dbl( list(M1, M2, M3, M4, M5, M6),
+        function(M){summary(M)$adj.r.squared})%>%
+  signif(3)
+
+TableS2_R2_adj <- c( 'R2Adjust', R2_adj[1], '',R2_adj[2], '',R2_adj[3], '',R2_adj[4], '',R2_adj[5], '',R2_adj[6], '')
+
+TableS2_dirty<- rbind(TableS2_df,
+          N_Obs_vec, 
+          TableS2_R2_adj)
+
+
+save(TableS2_dirty, file = '../SIdata/TableS2_dirty')
+
+
+
+TableS3_df <- bind_cols(Pred_Labels, 
+                        signif(map_dfc( list(M1_2, M2_2, M3_2, M4_2, M5_2, M6_2),
+                                              function(M){select( tidy(M), estimate, p.value ) }),
+                               3))
+
+R2_adj =  map_dbl( list(M1_2, M2_2, M3_2, M4_2, M5_2, M6_2),
+        function(M){summary(M)$adj.r.squared})%>%
+  signif(3)
+
+TableS3_R2_adj <- c( 'R2Adjust', R2_adj[1], '',R2_adj[2], '',R2_adj[3], '',R2_adj[4], '',R2_adj[5], '',R2_adj[6], '')
+
+TableS3_dirty<- rbind(TableS3_df,
+          N_Obs_vec, 
+          TableS3_R2_adj)
+
+save(TableS3_dirty, file = '../SIdata/TableS3_dirty')
+
+```
+
+
+
+# Global distribution maps
+
+```{r}
+world_map<-map_data("world")
+```
+
+
+```{r echo = FALSE}
+### Map with overlapping symbols (not used)
+
+ggplot()+
+  coord_fixed()+
+  xlab("")+ylab("")+
+  geom_polygon(data=world_map, size=0,
+               aes(x=long, y=lat, group=group), 
+               colour="white", fill="black")+
+  theme(panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(), 
+        panel.background=element_rect(fill="white", colour="white"), 
+        axis.line=element_line(colour="white"),	
+        axis.ticks=element_blank(),
+        axis.text.x=element_blank(), 
+        axis.text.y=element_blank())+
+  geom_point(data=  Study_Corr_Predictors,
+             aes(x=CENT_LONG, y=CENT_LAT, col = Mean_kendall_cor , shape = trait))+
+  scale_colour_gradientn(colours = c('blue4','blue3', 'blue1', 'yellow','red1','red3', 'red4') ,
+                         limits = c(-0.5, 0.5), 
+                         name = 'Mean Correlation')+
+  scale_shape(solid = FALSE,breaks =  c("TR_BodyLength_mm",
+                                        "TR_Mean_LengthMax",
+                                        "TR_QualBS_Numeric",
+                                        "TR_adult_body_mass_g",
+                                        "TR_Mean_SeedMass",
+                                        "TR_Max_Height" ),
+              name = 'Group:Trait',
+              labels = c("TR_BodyLength_mm"="Marine:  Body Length",
+                         "TR_QualBS_Numeric" = "Marine: Qualitative Body Size" ,
+                         "TR_Mean_LengthMax"= "Fish: Maximum Length", 
+                         "TR_adult_body_mass_g"= "Amniotes:Adult body mass",
+                         "TR_Mean_SeedMass"="Plants: Seed Mass",
+                         "TR_Max_Height"="Plants: Maximum Height"  ))+
+  theme(legend.position = 'bottom') +
+  guides(colour = guide_colourbar(title.position="top", title.hjust = 0.5),
+         shape = guide_legend(title.position="top", title.hjust = 0.5)) -> Map1
+```
+
+
+```{r}
+## Map 2 Using repelling symbols
+
+
+Data4Map <- select( Study_Corr_Predictors,
+                    CENT_LONG,CENT_LAT, Mean_kendall_cor ,trait ) %>%
+  left_join(data.frame( trait = c("TR_BodyLength_mm",
+                                        "TR_Mean_LengthMax",
+                                        "TR_QualBS_Numeric",
+                                        "TR_adult_body_mass_g",
+                                        "TR_Mean_SeedMass",
+                                        "TR_Max_Height" ),
+            shape = c('▲','■','♦','●','+','♣'))
+)
+
+
+
+ggplot()+
+  coord_fixed()+
+  xlab("")+ylab("")+
+  geom_polygon(data=world_map, size=0,
+               aes(x=long, y=lat, group=group), 
+               colour=FALSE, fill="black")+
+  theme(panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(), 
+        panel.background=element_rect(fill="grey90", colour="white"), 
+        axis.line=element_line(colour="white"),	
+        axis.ticks=element_blank(),
+        axis.text.x=element_blank(), 
+        axis.text.y=element_blank())+
+  geom_text_repel(data=  Data4Map,seed = 1,
+                  max.iter = 5000,segment.size = 0.3,
+                  arrow =  arrow(length = unit(0.005, "npc")),
+             aes(x=CENT_LONG, y=CENT_LAT, col = Mean_kendall_cor, label = shape), )+
+  scale_colour_gradientn(colours = c('blue4','blue3', 'blue1', 'yellow','red1','red3', 'red4') ,
+                         limits = c(-0.5, 0.5), 
+                         name = 'Size : Relative Abundance Change\nCorrelation (τ)')+
+  theme(legend.position=c(0.15,0.15), 
+        legend.direction = "horizontal", legend.title.align = 0.5) +
+  guides(colour = guide_colourbar(title.position="top",
+                                  barwidth = 10, ))-> Map2
+
+ggsave( '../Plots/SingleMap.png',plot = Map2, width = 13, height = 6)                     
+ggsave( '../Plots/SingleMap.pdf',plot = Map2, width = 13, height = 6, device = cairo_pdf)                     
+
+
+
+  # geom_point(data=  Data4Map,
+  #            aes(x=CENT_LONG, y=CENT_LAT), col = 'white')+
+
+#   annotate('Text', x= 0, y = -100,
+# label = 'Marine:  Body length = ▲, Marine: Qualitative body size = ■, Fish: Maximum length = ♦, Amniotes:Adult body mass = ●, Plants: Seed mass = +, Plants: Maximum height = ♣')+
+#    shape = guide_legend(title.position="top", title.hjust = 0.5)
+```
+
+# Summary stats for paper
+
+## Number of studies/species/time/observations
+
+```{r}
+## n observations
+StudyCells_Filt %>% 
+  left_join(bt_with_traits,
+            by = c("STUDY_ID_CELL", "STUDY_ID", "ABUNDANCE_TYPE", "BIOMASS_TYPE")) %>%
+  nrow()
+
+# percent observations with traits
+StudyCells_Filt %>%
+  left_join(bt_with_traits,
+            by = c("STUDY_ID_CELL", "STUDY_ID", "ABUNDANCE_TYPE", "BIOMASS_TYPE")) %>%
+  count(HasTraits)
+
+2130326 / (2130326+385849)
+
+## Number of assemblages used
+StudyCells_Filt %>% 
+  nrow()
+
+
+## number of studies used
+StudyCells_Filt %>%
+  summarise( n_distinct( STUDY_ID))
+
+## mumber of species
+StudyCells_Filt %>%
+  left_join(bt_with_traits,
+            by = c("STUDY_ID_CELL", "STUDY_ID", "ABUNDANCE_TYPE", "BIOMASS_TYPE")) %>%
+  summarise( n_distinct( TidyBTName ))
+
+## mumber of species with trait data
+StudyCells_Filt %>%
+  left_join(bt_with_traits,
+            by = c("STUDY_ID_CELL", "STUDY_ID", "ABUNDANCE_TYPE", "BIOMASS_TYPE")) %>%
+  distinct( TidyBTName , HasTraits) %>%
+  count(HasTraits)
+
+
+## Average length of studies
+hist(Study_Corr_Predictors$Mean_YearRange)
+mean(Study_Corr_Predictors$Mean_YearRange)
+range(Study_Corr_Predictors$Mean_YearRange)
+
+## Average number of species
+
+
+hist(Study_Corr_Predictors$Mean_Sp_div)
+mean(Study_Corr_Predictors$Mean_Sp_div)
+range(Study_Corr_Predictors$Mean_Sp_div)
+
+
+```
+\newpage
+
+# Full Raw results tables 
+
+A table of trait/study level results is available as 'Study_Corr_Predictors.csv' and is presented in 'tidy' form below:
+
+```{r}
+
+Study_Corr_Predictors %>%
+  write_csv('../Results/Study_Corr_Predictors.csv')
+
+Study_Corr_Predictors %>%
+  arrange( trait, STUDY_ID) %>%
+  mutate( trait = recode(trait , "TR_BodyLength_mm"="Marine:  Body Length",
+                         "TR_QualBS_Numeric" = "Marine: Qualitative Body Size" ,
+                         "TR_Mean_LengthMax"= "Fish: Maximum Length", 
+                         "TR_adult_body_mass_g"= "Amniotes:Adult body mass",
+                         "TR_Mean_SeedMass"="Plants: Seed Mass",
+                         "TR_Max_Height"="Plants: Maximum Height"  ))%>%
+  select('Trait tested' = trait,
+         STUDY_ID ,
+         tau =Mean_kendall_cor ,
+         'Species Richness' = Mean_Sp_div,
+         'Years Sampled'  =Mean_N_Years,
+         'Trait Completeness'= Mean_Completeness ,
+         'Year Range' = Mean_YearRange ,
+         'Number of Cells' = Cells,
+         'Latitude' = CENT_LAT, 
+         'Longitude' = CENT_LONG,
+         'Protected Area' = PROTECTED_AREA,
+         'Grain' = GRAIN_SQ_KM,
+         'Abundance Type' = ABUNDANCE_TYPE, 
+         'Biomass Type' = BIOMASS_TYPE,
+         'Study Title' = TITLE ) %>%
+  kableBOX()
+
+```
+
+\newpage
+
+# Trait Coverage statistics
+
+Note that the final data used is less than this, since some studies are excluded due to insufficient study-level trait coverage. 
+
+At *observation* level:
+```{r}
+bt_with_traits %>%
+  mutate( HAS_AdultBodyMass   =!is.na(TR_adult_body_mass_g ),
+          HAS_SeedMass        =!is.na(TR_Mean_SeedMass),
+          HAS_VegetativeHeight=!is.na(TR_Max_Height),
+          HAS_WoRMSBodyLength =!is.na(TR_BodyLength_mm),
+          HAS_QualSize        =!is.na(TR_QualitativeBodySize),
+          HAS_FishMaxLength   =!is.na(TR_Mean_LengthMax )) -> HasTRAITSdata
+
+
+HasTRAITSdata %>%
+  summarise(sum( HAS_AdultBodyMass), 
+            sum(   HAS_SeedMass  ), 
+            sum(         HAS_VegetativeHeight), 
+            sum(   HAS_WoRMSBodyLength ), 
+            sum(   HAS_QualSize      ), 
+            sum(     HAS_FishMaxLength   )) %>% 
+  t %>% kable
+
+HasTRAITSdata %>%
+  count(HAS_AdultBodyMass,HAS_SeedMass ,HAS_VegetativeHeight,HAS_WoRMSBodyLength,
+        HAS_QualSize,HAS_FishMaxLength, sort = TRUE ) 
+
+```
+
+At *species* level:
+
+```{r}
+
+HasTRAITSdata %>%
+  distinct(TidyBTName, HAS_AdultBodyMass,HAS_SeedMass, HAS_VegetativeHeight,
+           HAS_WoRMSBodyLength,  HAS_QualSize   ,  HAS_FishMaxLength  ) %>%
+  summarise(sum(HAS_AdultBodyMass), 
+            sum(HAS_SeedMass  ), 
+            sum(HAS_VegetativeHeight), 
+            sum(HAS_WoRMSBodyLength ), 
+            sum(HAS_QualSize      ), 
+            sum(HAS_FishMaxLength   )) %>% 
+  t %>% kable
+```
+
+
+## Trait data overlap 
+
+There is little overlap between the trait databases as they cover rather different taxa. The principal (unsurprising) exception is that a large proportion of the entries in the fish database are shared with the WoRMS database. NB that it is species that are counted here, not observations. Within the WoRMS database few species have both quantitative and qualitative body size data. The overlap within the plant database was much higher. Although the overall correlation between the two plant trait values is strong, there are two clear clusters of height, within which the correlation between seed size and plant height is weaker. Since the BioTIME studies tend to focus on particular guilds, this justifies the use of both traits. Where there is data from both the more general 'marine' database (WoRMS) and the specialised fish databse, the two values closely correlate. 
+
+```{r}
+x <- list( HAS_SeedMassOrVegHeight    =  unique(pull(filter(HasTRAITSdata,HAS_SeedMass| HAS_VegetativeHeight), TidyBTName )),
+          HAS_AdultBodyMass          =  unique(pull(filter(HasTRAITSdata,HAS_AdultBodyMass                 ), TidyBTName )),
+           HAS_WoRMSBodyLengthOrQualL =  unique(pull(filter(HasTRAITSdata,HAS_WoRMSBodyLength |HAS_QualSize ), TidyBTName )),
+           HAS_FishMaxLength          =  unique(pull(filter(HasTRAITSdata,HAS_FishMaxLength                ), TidyBTName )))
+
+
+TraitDBVenn_sp<-ggVennDiagram(x, 
+                                           category.names = c( 'TRY\n(Seed mass\nor Height))',
+                                     'Amniote (Body Mass)',
+                                     'WoRMS\n(Qualitative\nor Quantitative)', 
+                                     'Fish  (Length)')) +
+  guides(fill = FALSE)+
+  scale_fill_gradient(high = "grey50", low = "white")
+TraitDBVenn_sp
+
+WoRMSOverlap <- list(HAS_WoRMSBodyLength =  unique(pull(filter(HasTRAITSdata,HAS_WoRMSBodyLength), TidyBTName )),
+                     HAS_WoRMSQualL =  unique(pull(filter(HasTRAITSdata,HAS_QualSize), TidyBTName )))
+
+WoRMS_Venn <- ggVennDiagram(WoRMSOverlap, category.names = c( 'Quantitative\nBody Length', 
+                                                'Qualitative\nBody Size'))+
+  guides(fill = FALSE)+
+  scale_fill_gradient(high = "grey50", low = "grey80")
+WoRMS_Venn
+
+
+TRYOverlap <- list(HAS_SeedMass=  unique(pull(filter(HasTRAITSdata,HAS_SeedMass), TidyBTName )),
+                   HAS_VegHeight =  unique(pull(filter(HasTRAITSdata,HAS_VegetativeHeight), TidyBTName )))
+
+
+TRY_Venn <- ggVennDiagram(TRYOverlap, category.names = c( 'Seed Mass', 
+                                                'Vegetative\nHeight'))+
+  guides(fill = FALSE)+
+  scale_fill_gradient(high = "grey50", low = "grey80")
+
+
+TRY_Venn
+```
+
+```{r}
+
+
+PlantCorrPlot<- HasTRAITSdata %>%#
+  filter(HAS_SeedMass,  HAS_VegetativeHeight) %>%
+   distinct(TidyBTName , TR_Mean_SeedMass,  TR_Max_Height)%>%
+  ggplot(aes(TR_Mean_SeedMass , TR_Max_Height ) ) +
+  geom_point()+
+  scale_y_log10() +
+  theme_classic()+
+  xlab( 'Seed Mass')+#
+  ylab( 'Maximum Vegetative Height')
+PlantCorrPlot
+```
+
+
+
+```{r}
+### Fish lengths
+
+FishCorrPlot<- HasTRAITSdata %>%#
+  filter(HAS_WoRMSBodyLength,  HAS_FishMaxLength) %>%
+  distinct(TidyBTName , TR_BodyLength_mm ,  TR_Mean_LengthMax )%>%
+  ggplot(aes(x= TR_BodyLength_mm  , y= TR_Mean_LengthMax  ) ) +
+  geom_point()+
+  theme_classic()+
+  xlab( 'WoRMS Length')+
+  ylab( 'Fishbase Length')+
+  scale_x_log10()+
+  scale_y_log10() 
+FishCorrPlot
+```
+
+
+```{r}
+plot_grid(TraitDBVenn_sp + ggtitle('a)'), 
+          plot_grid( WoRMS_Venn+ ggtitle('b)'),
+                     FishCorrPlot+ ggtitle('c)'),
+                     TRY_Venn+ ggtitle('d)') ,
+                     PlantCorrPlot+ ggtitle('e)'), nrow = 2),
+          ncol = 1, rel_heights = c(1, 1.5))-> ExtDatFig2
+ggsave( '../Plots/TraitOverlapPlot.pdf',ExtDatFig2, height = 12, width = 9)
+
+```
+
+
+###  Studies with multiple traits
+
+80 studies appeared in multiple traits 
+
+```{r}
+Study_Corr_Predictors %>% 
+  select( STUDY_ID, trait, TITLE) %>%
+  add_count(STUDY_ID) %>%
+  filter( n>1) %>%
+  arrange(STUDY_ID,  trait) %>%
+  group_by(STUDY_ID) %>%
+  summarise( Pairs = paste(trait, collapse = ' ' )) %>%
+  count(Pairs)
+
+
+
+Study_Corr_Predictors %>% 
+  select( STUDY_ID, trait, TITLE) %>%
+  add_count(STUDY_ID) %>%
+  filter( n>1, trait =='TR_adult_body_mass_g') 
+
+
+Study_Corr_Predictors %>% 
+ select( STUDY_ID, trait, TITLE) %>%
+  filter(STUDY_ID == 191)
+# one study 191 appears in three (NEFSC Benthic Database (OBIS-USA))
+
+```
+
+```{r}
+### Which studies from TRY actually used (and so need seperate citing)
+
+bt_with_traits%>%
+  distinct(TRY_datasetIDs_Height ,TRY_datasetIDs_SeedMass ) %>%
+  filter( !is.na(TRY_datasetIDs_Height ) |!is.na(TRY_datasetIDs_SeedMass )  ) -> TRY_studylist
+
+
+(c(TRY_studylist$TRY_datasetIDs_SeedMass , TRY_studylist$TRY_datasetIDs_Height)%>%
+    paste(collapse = ' ') %>%
+    str_split(pattern = ' '))[[1]] %>%
+  as.numeric() %>%
+  na.omit() %>%
+  unique() -> UniqueTryStudiesUsed
+
+TRY_StudyRefs         <- read_csv('../TraitTables/TRY_StudyRefs_focal.csv')
+
+TRY_StudyRefs %>%
+  filter( DatasetID %in% UniqueTryStudiesUsed) %>%
+  arrange(LastName)%>%
+  distinct(Reference) %>% 
+  write_csv('../TraitTables/RefsUsedFromTry.csv')
+
+
+```
+
+
+

@@ -1,0 +1,386 @@
+---
+title: "3. Trait Database Preparation"
+output: 
+  html_document: 
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Introduction
+
+This script prepares the data from the four trait databases used into a format that it can be joined to the observations from BioTIME. 
+
+
+```{r message = FALSE}
+library(tidyverse)
+library(knitr)
+library(readxl)
+library(purrr)
+library(worrms)
+library(lubridate)
+library(data.table)
+library(kableExtra)
+library( taxize)
+
+kableBOX <- function(df){
+  df %>%
+    kable()%>%
+    kable_styling() %>%
+    scroll_box(width = "100%", height = "600px")%>%
+    return()
+}
+
+
+```
+
+# Loading Names
+
+```{r}
+
+bt_names<- read_csv('../BT_Tables/bt_grid_collate_filter_tidy.csv',
+                    col_types = cols(
+                      STUDY_ID_CELL = col_character(),
+                      STUDY_ID = col_double(),
+                      YEAR = col_double(),
+                      CrossCellAbundance = col_double(),
+                      CrossCellBiomass = col_double(),
+                      ABUNDANCE_TYPE = col_character(),
+                      BIOMASS_TYPE = col_character(),
+                      TidyBTName = col_character(),
+                      canonicalName = col_character(),
+                      rank = col_character(),
+                      kingdom = col_character())) %>% 
+  distinct( TidyBTName, canonicalName, rank,kingdom)
+
+```
+
+
+# Amniotes
+
+Data was downloaded from https://esajournals.onlinelibrary.wiley.com/doi/10.1890/15-0846R.1 The names are recently curated, so no further work was required beyond extracting the relevant fields.  
+
+```{r}
+Amniote_DB <- read_csv("../TraitTables/Amniote_Database_Aug_2015.csv",    
+                       na = '-999', guess_max =20000)%>%
+  mutate(Binomial = paste(genus, species))%>%
+  select(common_name , adult_body_mass_g, Binomial )
+
+```
+
+# Plants
+
+A data download request though the TRY data portal (https://www.try-db.org/TryWeb/dp.php) was made on 15th October 2020 (request 12219). Traits 26 (seed dry mass) and 3106 (Plant height vegetative) were chosen for the large number of records available. TRY cleans its names with reference to the Taxonomic Names Resolution Service (TNRS),  these 'Accepted' names were not further manipulated before being joined to the cleaned names from the BioTIME database. 
+
+```{r message=FALSE}
+## NB if seeking to conduct a new analysis, you should make a new request for the TRY data, rather than just reusing this download
+TRY_StudyRefs         <- read_csv('../TraitTables/TRY_StudyRefs_focal.csv')   
+TRY_Values_Slim       <- read_csv( '../TraitTables/TRY_Traits.csv')
+```
+
+Where there are multiple measurements for a single species, this maximum height values and mean log seed mass were taken, excluding those where the trait values varied by over an order of magnitude.
+
+```{r}
+TRY_Values_Slim %>%
+  group_by(AccSpeciesName        , TraitID ) %>%
+  summarise(  Mean = mean(log10(StdValue)), 
+              Max = max(StdValue),
+              sd_log = sd(log10(StdValue)),
+              datasetIDs = paste(unique(DatasetID), collapse = ' ')) %>% 
+  filter(is.na(sd_log) |sd_log <1 ) %>%  # remove highly variable  measures as unreliable   
+  mutate( Trait = ifelse(TraitID  == 26, 'SeedMass', 'Height'))  %>% 
+  select( - TraitID, -sd_log) %>%
+  pivot_wider(id_cols = AccSpeciesName, 
+              names_from= Trait   , 
+              values_from = Mean: datasetIDs  ) %>%
+  select( - Mean_Height , - Max_SeedMass ) %>%
+  ungroup()%>%
+  mutate( kingdom ='Plantae')%>%
+  inner_join(bt_names , by = c( 'AccSpeciesName' =  'canonicalName', 
+                                'kingdom' = 'kingdom' )) -> TRY_Traits_Names
+
+```
+
+# Fish
+
+We directly used the trait compilation of Beukhof *et al* https://doi.pangaea.de/10.1594/PANGAEA.900866  Names there had already been standardised and cleaned. From the range of traits available, length.max (the maximum length of the adult fish) was selected as a straightforward ecologically relevant size trait. Where a species record was associated with multiple values (due to multiple locations ) a simple average was taken.
+
+```{r}
+Beukhof_Fish <- read_excel("../TraitTables/TraitCollectionFishNAtlanticNEPacificContShelf.xlsx", 
+                           sheet = "Trait values") %>% 
+  filter( taxonomic.rank %in% c('S', 'G'))%>% 
+  select( taxon  , taxonomic.rank,length.max, reference.length.max ) %>%
+  group_by(taxon, taxonomic.rank) %>%
+  summarise(  Mean_LengthMax =   mean( length.max), 
+              Refs_Length = paste(unique(reference.length.max), collapse = ' / '))
+```
+
+# WoRMs
+
+The general marine database WoRMS includes a very large diversity of information, but need considerable collation. Aphia IDs for use with the database were gathered using the WoRMS API for all canonical species names identified in the filtered BioTIME database, except plants and fungi. 
+
+```{r eval = FALSE}
+Names2WoRMS <-  unique(filter(bt_names, !(kingdom %in% c('Plantae' , 'Fungi')))$canonicalName)
+AphiaID_Download<- get_wormsid_(Names2WoRMS, accepted = TRUE, messages = FALSE)   
+save(AphiaID_Download,file= '../NameTables/AphiaID_Download')
+```
+
+Matches to Aphia ID were filtered based on the taxonomic level, and if there were still multiple matches, then all non-exact matches were dropped. This left only a small number of remaining indeterminate IDs (mostly genera) that were dropped for being indeterminate. This process resulted in 11,141 Aphia matches
+
+```{r}
+load( '../NameTables/AphiaID_Download')
+
+AphiaID_Download[-1] %>% ## drop 'NA' search...
+  compact %>%
+  rbindlist( idcol = 'SubmittedName')%>%
+  as_tibble() %>%
+  mutate(NumPartsIn_FoundName = str_count(scientificname, '\\w+'),
+         NumPartsIn_SubmtName = str_count( SubmittedName , '\\w+'))%>%
+  filter(NumPartsIn_FoundName ==NumPartsIn_SubmtName,
+         status == 'accepted')%>%
+  group_by(SubmittedName)%>%
+  add_tally(name = 'NumberOfOptions')%>%
+  mutate( ExactMatch  =  SubmittedName ==scientificname)%>% 
+  filter( NumberOfOptions==1 | ExactMatch) %>% 
+  group_by(SubmittedName)%>%
+  add_tally(name = 'NumberOfOptions')%>%
+  filter( NumberOfOptions==1) %>% 
+  select(SubmittedName, AphiaID,  Aphia_scientificname=scientificname ) -> CompactOut_WormsID
+
+```
+
+All attributes attached to this set of Aphia IDs were downloaded and the data structured unnested and consolidated into a single dataframe. Of the very wide range of available trait data, the greatest coverage was in measures of body length and qualitative body size. 
+
+Quantitative body length values were scaled to units of mm. Values from stages other than adults or corresponding to minimums or thicknesses were discarded. Where there were still multiple values, these were averaged, except where the values differed by over an order of magnitude which were discarded. 
+
+
+```{r eval = FALSE}
+#  Download all attributes attached to Aphia IDs
+AllWoRMS_Attributes<-map_df(1:nrow(CompactOut_WormsID),
+                            function( i){ 
+                              cat(i); cat('\n')
+                              ID <- CompactOut_WormsID$AphiaID[i]
+                              wm_attr_data_(id = ID,   include_inherited = TRUE) })
+save(AllWoRMS_Attributes, file = '../TraitTables/AllWoRMS_Attributes_Download')
+```
+
+```{r}
+load(file ='../TraitTables/AllWoRMS_Attributes_Download')
+```
+
+```{r}
+
+#Heavily nested structure, needs to be unnested using purrr.
+# Units and further details for the body size measurements are held in the 'children' set of nested data frames.
+# All the attributes can be nested extremely deep.
+# There seems to be no particular pattern, but max depth seems to be eight. thankfully they are consistently named so will just recursively unnest 'children'. 
+
+AllWoRMS_Attributes%>%
+  filter(measurementType == 'Body size' )%>%
+  mutate( Overall_MeasureID = row_number())%>%
+  unnest(cols = c(children), names_repair = tidyr_legacy ,  keep_empty = TRUE)  %>%  
+  unnest(cols = c(children), names_repair = tidyr_legacy ,  keep_empty = TRUE)  %>%  
+  unnest(cols = c(children), names_repair = tidyr_legacy ,  keep_empty = TRUE)  %>%  
+  unnest(cols = c(children), names_repair = tidyr_legacy ,  keep_empty = TRUE)  %>%  
+  unnest(cols = c(children), names_repair = tidyr_legacy ,  keep_empty = TRUE)  %>%  
+  unnest(cols = c(children), names_repair = tidyr_legacy ,  keep_empty = TRUE)  %>%  
+  unnest(cols = c(children), names_repair = tidyr_legacy ,  keep_empty = TRUE)  %>%  
+  unnest(cols = c(children), names_repair = tidyr_legacy ,  keep_empty = TRUE)  %>% 
+  select(id,AphiaID,Overall_MeasureID, measurementTypeID,measurementType,
+         measurementValue,source_id,AphiaID_Inherited, CategoryID , 
+         starts_with('measurementType'),
+         -starts_with('measurementTypeID'),
+         starts_with('measurementValue')) %>% 
+  rename( measurementType0   = measurementType  ,  measurementValue0 = measurementValue) %>%
+  gather('MeasureTypeNumber', 'MeasurementType',  starts_with('measurementType'))%>%
+  gather('MeasurementValueNumber', 'MeasurementValue',  starts_with('measurementValue'))%>%
+  mutate(MeasureTypeNumber = parse_number(MeasureTypeNumber), 
+         MeasurementValueNumber = parse_number(MeasurementValueNumber))%>%
+  filter( MeasureTypeNumber ==MeasurementValueNumber ,
+          !is.na( MeasurementType ) ) %>%
+  mutate(MeasurementType = if_else(MeasureTypeNumber  ==1 , 
+                                   paste0(MeasurementType, 'First'),# This is to resolve issue of multiple values being labelled as 'Unit', preventing the pivot 
+                                   MeasurementType ) )%>%
+  pivot_wider(id_cols = Overall_MeasureID ,
+              names_from = MeasurementType ,
+              values_from = MeasurementValue,
+              values_fill = NA)-> WoRMS_BodySizeDB_Unnested
+```
+
+
+```{r}
+## Extracting Quantitative body sizes
+## Extracting Quantitative measures of body size and scaling to consistent units 
+UnitsTbl <-data.frame(Units  = c( 'µm', 'mm','cm',  'm', 'cm³' , 'kg',  'ton' ),
+                      Quantity =    c('L', 'L', 'L', 'L', 'V', 'M', 'M'),
+                      Scaler_to_mm =  c(0.001, 1, 10, 1000, NA, NA, NA),
+                      Scaler_to_kg  = c(NA, NA, NA, NA, NA, 0, 907.185))
+
+AllWoRMS_Attributes%>%
+  filter(measurementType == 'Body size' )%>%
+  select(-id,  - children,  -measurementTypeID, -measurementType,  -measurementValue)%>%
+  mutate( Overall_MeasureID = row_number())%>%
+  left_join(WoRMS_BodySizeDB_Unnested, by = "Overall_MeasureID") %>%
+  left_join(UnitsTbl, by = c('UnitFirst'   = "Units"))%>%
+  mutate(  `Body size` = as.numeric(  `Body size`),
+           BodyLength_mm = `Body size` * Scaler_to_mm,
+           BodyMass_kg  = `Body size` * Scaler_to_kg )%>%
+  select(  AphiaID, source_id, reference,  Type,    Dimension, Stage,   Gender, Quantity, BodyLength_mm, BodyMass_kg)-> AllWorms_Scaled_BodySize
+
+write_csv( AllWorms_Scaled_BodySize, '../TraitTables/AllWorms_Scaled_BodySize.csv')
+
+AllWorms_Scaled_BodySize %>% 
+  filter(Stage == 'adult' | is.na(Stage)) %>%
+  filter(Type != 'minimum' | is.na(Type))%>%
+  filter(Dimension  != 'volume' | is.na(Dimension))%>%      
+  filter(Dimension  != 'thickness' | is.na(Dimension))%>%      
+  group_by(AphiaID)%>% 
+  add_count() %>%   # View        # many multiple entries
+  summarise( Count = first( n),
+             LogBL_max = max(log10(BodyLength_mm), na.rm = TRUE),
+             LogBL_min = min(log10(BodyLength_mm), na.rm=TRUE) , 
+             BodyLength_mm = mean(BodyLength_mm, na.rm = TRUE)) %>%
+  mutate(BodyLength_mm_VAR = LogBL_max-LogBL_min) %>% 
+  filter(BodyLength_mm_VAR <1) %>%
+  select(AphiaID, BodyLength_mm  )%>%
+  mutate(AphiaID = as.numeric(AphiaID)) -> WoRMS_BodyLength_mm
+
+```
+
+Qualitative body sizes within the database are divided into four categories (<0.2 mm , 0.2 - 2mm, 2-200 mm, >200 mm), that were carried forwards as simple number (1-4). Data not from adults was discarded, and where an ID was associated with multiple distinct categories, it was discarded.
+
+```{r} 
+## Extracting qualitative body sizes
+AllWoRMS_Attributes%>%
+  filter(measurementType == 'Body size (qualitative)' )%>%
+  mutate( Overall_MeasureID = row_number())%>%
+  unnest(cols = c(children),  names_repair = tidyr_legacy ,keep_empty = TRUE)  %>%  
+  unnest(cols = c(children), names_repair = tidyr_legacy ,  keep_empty = TRUE) %>%
+  select(id,AphiaID,Overall_MeasureID, measurementTypeID,
+         measurementType,measurementValue,
+         source_id,AphiaID_Inherited, CategoryID , 
+         starts_with('measurementType'),
+         - starts_with('measurementTypeID'),
+         starts_with('measurementValue')) %>% 
+  rename( measurementType0   = measurementType  ,  measurementValue0 = measurementValue) %>%
+  gather('MeasureTypeNumber', 'MeasurementType',  starts_with('measurementType'))%>%
+  gather('MeasurementValueNumber', 'MeasurementValue',  starts_with('measurementValue'))%>%
+  mutate(MeasureTypeNumber = parse_number(MeasureTypeNumber), 
+         MeasurementValueNumber = parse_number(MeasurementValueNumber))%>%
+  filter( MeasureTypeNumber ==MeasurementValueNumber ,
+          !is.na( MeasurementType ) ) %>%
+  pivot_wider(id_cols = Overall_MeasureID ,
+              names_from = MeasurementType ,
+              values_from = MeasurementValue,
+              values_fill = NA)-> WoRMS_QualBodySize_Unnested
+
+WoRMS_QualBodySize_Unnested %>%
+  count(Stage, `Body size (qualitative)`) %>% 
+  kableBOX()
+
+AllWoRMS_Attributes%>%
+  filter(measurementType == 'Body size (qualitative)' )%>%
+  mutate( Overall_MeasureID = row_number())%>%
+  select(-id,  - children,  -measurementTypeID, -measurementType,  -measurementValue)%>%
+  left_join(WoRMS_QualBodySize_Unnested, by = "Overall_MeasureID") %>%
+  rename( QualitativeBodySize = `Body size (qualitative)`)%>%
+  select(  AphiaID, source_id, reference,qualitystatus, QualitativeBodySize,Stage) -> AllWorms_Qual_BodySize
+
+write_csv(AllWorms_Qual_BodySize, '../TraitTables/AllWorms_Qual_BodySize.csv')
+
+#Where there are multiple entries, check if they are the same. If so, then keep, if not chuck.
+
+WoRMS_sources2 <- distinct( AllWorms_Qual_BodySize , source_id, reference)
+
+AllWorms_Qual_BodySize %>% 
+  filter(Stage == 'adult' | is.na(Stage)) %>%
+  group_by(AphiaID)%>% 
+  add_count() %>%   # a few  multiple entries
+  mutate(AllSame = n_distinct(QualitativeBodySize))  %>%  
+  filter( AllSame ==1) %>%
+  summarise( QualitativeBodySize = first(QualitativeBodySize) ) %>%
+  mutate(AphiaID = as.numeric(AphiaID))-> WoRMS_Qual_BodySize
+
+```
+
+
+```{r}
+
+## Combine into one table
+CompactOut_WormsID %>%
+  left_join(WoRMS_BodyLength_mm, by = "AphiaID") %>%
+  left_join(WoRMS_Qual_BodySize, by = "AphiaID") -> WoRMS_Traits
+
+
+write_csv(WoRMS_Traits, '../TraitTables/Worms_Traits.csv' )
+
+```
+
+Where both qualitative and quantitative values are available, they correspond reassuringly well 
+
+```{r}
+WoRMS_Traits  %>%
+  filter( !is.na(QualitativeBodySize ), 
+          !is.na( BodyLength_mm)) -> WoRMS_BOTH
+
+WoRMS_BOTH %>% 
+  ggplot( aes( x = QualitativeBodySize, y= BodyLength_mm))+
+  geom_boxplot()+
+  scale_y_log10()+
+  scale_x_discrete(limits =c('<0.2 mm', '0.2 - 2.0 mm',
+                             '2.0 - 200 mm','>200 mm'))
+
+
+WoRMS_BOTH$QualitativeBodySize <- factor(WoRMS_BOTH$QualitativeBodySize ,
+                                                levels = c(  "<0.2 mm"  ,  "0.2 - 2.0 mm", "2.0 - 200 mm",    ">200 mm"     ))
+
+
+
+WoRMS_BOTH$QualBS_Numeric <- as.numeric(WoRMS_BOTH$QualitativeBodySize) 
+
+cor(WoRMS_BOTH$QualBS_Numeric, WoRMS_BOTH$BodyLength_mm , method = 'spearman')
+
+```
+
+# Combining All Trait Databases
+
+These four trait data frames were combined into a single trait database `bt_names_all_traits.csv`
+
+```{r}
+bt_names %>%
+  left_join(WoRMS_Traits , by = c('canonicalName'  = 'SubmittedName') ) %>%
+  left_join( Beukhof_Fish , by = c('canonicalName'  =    'taxon')) %>%
+  left_join( Amniote_DB , by = c('canonicalName'  = 'Binomial')) %>%
+  left_join(TRY_Traits_Names , by = c('canonicalName'  =    'TidyBTName',
+                                      'kingdom' = 'kingdom',
+                                      'rank' = 'rank' )) -> bt_names_traits
+
+bt_names_traits %>%
+  select(   TidyBTName,canonicalName,rank,kingdom,
+            # Other IDs
+            common_name,  AphiaID,  Aphia_scientificname, TRY_AccSpeciesName=AccSpeciesName,
+            # Traits
+            TR_BodyLength_mm = BodyLength_mm ,
+            TR_QualitativeBodySize=QualitativeBodySize,
+            TR_Mean_LengthMax = Mean_LengthMax,
+            TR_adult_body_mass_g=  adult_body_mass_g,
+            TR_Mean_SeedMass=  Mean_SeedMass, 
+            TR_Max_Height=Max_Height,
+            # References ()
+            Fish_Refs_Length = Refs_Length,
+            TRY_datasetIDs_SeedMass =   datasetIDs_SeedMass,
+            TRY_datasetIDs_Height =datasetIDs_Height                        ) -> bt_names_all_traits
+
+
+bt_names_all_traits%>%
+  write_csv('../TraitTables/bt_names_all_traits.csv' )
+
+```
+
+
+
+
+
+

@@ -1,0 +1,188 @@
+---
+title: "1. Gridding and Grouping Observations"
+output:
+  html_document: 
+    toc: yes
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Introduction
+
+This script handles the gridding and grouping of the observations within BioTIME into distinct assemblages. The core of the code is based on https://raw.githubusercontent.com/sChange-workshop/BioGeo-BioDiv-Change/v2.0.0/R/01_Study_to_Grid.R (original authors Shane Blowes and Sarah Supp).
+
+The main input to this script is the publicly available BioTIME database (both the main dataset *NB 1.2 GB*, and the metadata), downloaded from https://doi.org/10.5281/zenodo.3265871. 
+
+The core problem this script addresses is that some of the the BioTIME studies are highly localised to specific plots, but others are widely dispersed (e.g. observations from research cruises). The first step is to classify studies as having samples from one or more locations in space:	Single Location (SL) and	many location (ML). For the ML studies, they are assigned to a grid cells within a global grid of hexagons. The size fo this grid was determined by comparison to the scale of the SL studies. 
+
+In the SL studies, all the observations from different plots are summed together within each year. While in principle it would be possible to analyze at the plot-level , the diversity of structure of individual studies and how they are recorded within BioTIME makes this infeasible at present. 
+
+
+```{r message = FALSE, warning = FALSE}
+library(mapdata)
+library(tidyverse)
+library(dggridR)
+library(scales)
+library(vegan)
+library(knitr)
+library(readxl)
+library(purrr)
+library(lubridate)
+library(kableExtra)
+
+kableBOX <- function(df){
+  df %>%
+    kable()%>%
+    kable_styling() %>%
+    scroll_box(width = "100%", height = "600px")%>%
+    return()
+}
+
+bt_meta <- read_csv("../BT_Tables/BioTIMEMetadata_02_04_2018.csv")
+
+############ NB not included in repository as too large!!
+## Download from https://doi.org/10.5281/zenodo.3265871
+
+bt <- read_csv("~/Documents/QMUL Large files/BioTIMEQuery02_04_2018.csv",   
+               col_types = cols( X1 = col_double(),
+                                 STUDY_ID = col_double(),
+                                 DAY = col_double(),
+                                 MONTH = col_double(),
+                                 YEAR = col_double(),
+                                 SAMPLE_DESC = col_character(),
+                                 PLOT = col_character(),
+                                 ID_SPECIES = col_double(),
+                                 LATITUDE = col_double(),
+                                 LONGITUDE = col_double(),
+                                 sum.allrawdata.ABUNDANCE = col_double(),
+                                 sum.allrawdata.BIOMASS = col_double(),
+                                 GENUS = col_character(),
+                                 SPECIES = col_character(),
+                                 GENUS_SPECIES = col_character()))
+```
+
+# Distinguishing SL and ML studies 
+
+All studies with a single geographic coordinate location were assigned as 'SL'. This included two outliers with very large extent No.337 (Mountain Birdwatch) and No.510 (Butterfly fauna in Mount Gariwang-san Korea). Other studies that had multiple coordinates, but had an area less than 73.6 km^2 (the mean + 1 standard deviation of the spatial extent of the non-outlier SL studies) were also assigned as 'SL'. This is so that small scale studies are not unnecessarily arbitrarily split between grid cells.
+
+```{r}
+##  Calculate the extent and mean for SL studies, without the outlier[s]
+SL_extent<- bt_meta %>% 
+  filter(NUMBER_LAT_LONG == 1,
+         AREA_SQ_KM<=500) %>% 
+  summarise(extent_mean = mean(AREA_SQ_KM),    
+            extent_sd = sd(AREA_SQ_KM))
+
+SL_extent_sd   <-  SL_extent$extent_sd
+SL_extent_mean <- SL_extent$extent_mean
+
+##	change the MLs into SLs that satisfy the criterion (< mean + sd)
+bt_meta <- bt_meta%>%
+  mutate( StudyMethod = ifelse(NUMBER_LAT_LONG == 1, "SL", "ML"),
+          StudyMethod = ifelse(AREA_SQ_KM < (SL_extent_mean+SL_extent_sd), "SL", StudyMethod)       )
+
+```
+
+
+# Grid Multi-location studies
+
+We used the `dggridR` package to construct a global grid of mostly hexagonal cells of nearly equal size. We used resolution '12', in keeping with previous work as the average cell area (96 km$^2$) most closely corresponds to spread of spatial extents of the SL studies. The cell ID corresponding to each observations location coordinates was assigned
+
+```{r}
+dgg <- dgconstruct(res=12)
+dgg <- dgsetres(dgg, res = 12)
+dggetres(dgg) %>% filter( res == 12)
+```
+
+```{r}
+bt <- bt %>% 
+  left_join(select(bt_meta, STUDY_ID,CENT_LONG ,CENT_LAT,
+                   StudyMethod, ABUNDANCE_TYPE , BIOMASS_TYPE),
+            by = "STUDY_ID") %>%
+  mutate(lon_to_grid = if_else(StudyMethod=="SL", CENT_LONG, LONGITUDE),
+         lat_to_grid = if_else(StudyMethod=="SL", CENT_LAT, LATITUDE))
+
+bt <- bt %>% 
+  mutate(Cell  =   dgGEO_to_SEQNUM(dgg,
+                                   in_lon_deg =lon_to_grid,
+                                   in_lat_deg =lat_to_grid)$seqnum    )
+
+```
+
+## Filter and collating observations
+
+Observations from study /cell combinations that did not include at least 10 distinct species and have at least 5 year range of observations were filtered out at this point. Then all values of abundance and biomass from within the same year were summed for each species within each cell at each year. 
+
+```{r message = FALSE}
+
+# Determine how many times each grid cell was sampled, hwo many species seen and total year range
+bt %>%
+  group_by(STUDY_ID, Cell) %>% 
+  summarise(Tot_Species_Cell = n_distinct(ID_SPECIES),
+            n_dist_years = n_distinct(YEAR),
+            Year_range = max(YEAR) - min(YEAR))-> N_Returns_ToCell
+
+bt_grid_collate_filter <- bt %>%
+  left_join(N_Returns_ToCell,
+            by = c("STUDY_ID", "Cell"))%>%
+  filter( Tot_Species_Cell >= 10,
+          Year_range >= 5) %>%                                       
+  unite(col=STUDY_ID_CELL, STUDY_ID, Cell, sep="_", remove=FALSE) %>%
+  group_by(STUDY_ID_CELL, STUDY_ID, YEAR, Cell, ID_SPECIES) %>%
+  summarise( CrossCellAbundance = sum(as.numeric(sum.allrawdata.ABUNDANCE ), na.rm=TRUE),
+             CrossCellBiomass = sum(as.numeric(sum.allrawdata.BIOMASS), na.rm=TRUE)) %>% 
+  ungroup() %>%
+  left_join(select(bt_meta, STUDY_ID,CENT_LONG ,CENT_LAT,
+                   StudyMethod, ABUNDANCE_TYPE , BIOMASS_TYPE), by = "STUDY_ID") 
+
+```
+
+Collation was done by the `ID_SPECIES` field of BioTIME. Where each ID was associated with multiple names, they were amalgamated at this stage for later processing. 
+
+```{r message = FALSE}
+## Re adding original BioTime names to the ID Where there are multiple names, separating here with a slash
+bt %>%
+  distinct(ID_SPECIES, GENUS_SPECIES) %>%
+  group_by(ID_SPECIES)%>%
+  summarise( OrigBioTimeNames =  paste( unique(GENUS_SPECIES),  collapse = " / " )) -> OrigNameTable
+
+bt_grid_collate_filter  %>%
+  left_join(OrigNameTable, by = "ID_SPECIES") %>%
+  select( STUDY_ID_CELL, STUDY_ID,  YEAR, ID_SPECIES, OrigBioTimeNames, CrossCellAbundance,
+          CrossCellBiomass, ABUNDANCE_TYPE, BIOMASS_TYPE ) %>%
+  write_csv("../BT_Tables/bt_grid_collate_filter.csv" )
+
+```
+
+## Summary Stats
+
+This filterring and collating process, before attempting to link to any trait data gives 120 ML studies and 142 SL studies, from which:
+
+```{r message = FALSE}
+bt_grid_collate_filter %>%
+  group_by(STUDY_ID)%>%
+  summarise(SM = first(StudyMethod))%>%
+  count(SM  ) %>% 
+  kable()
+
+bt_grid_collate_filter %>%
+  summarise( `Total Records` = n(),
+             `Total Species` = n_distinct(ID_SPECIES ), 
+             `Total Studies` = n_distinct( STUDY_ID  ), 
+             `Total Time Series` = n_distinct(STUDY_ID_CELL  )) %>%
+  kable()
+```
+
+
+Most studies are count based. However, several studies have both abundance and count data, and some just include biomass data: 
+
+```{r}
+bt_meta %>%
+  count(ABUNDANCE_TYPE,BIOMASS_TYPE ) %>%
+  kable()
+
+```
