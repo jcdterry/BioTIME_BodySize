@@ -14,9 +14,8 @@ Role of scripts:
 2. Cleans the names assigned to records in BioTIME by cross-referencing with GBIF taxonomic backbone
 3. Gathers trait data for these species from a variety of sources 
 4. Conducts the analyses described in the paper
-5. Demonstrates the analytic method used to summarise body-size -community dynamics relationships
 
-The key functions to calculate $\tau$ as described in the paper are stored in `RankCorrFunc.R`
+The key functions to transform the populaiton data and calculate the slopes as described in the paper are stored in `FitThreeApproaches.R`
 
 `ExtendedData.rmd` makes additional cosmetic changes to generate the extended data tables and figures. 
 
