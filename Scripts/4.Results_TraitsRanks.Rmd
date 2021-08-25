@@ -174,7 +174,7 @@ Find_all_fits_splLvl(StudyCell = '316_442925',
 
 ```
 
-## Run over all functuon 
+## `Run over all' function 
 
 ```{r}
 RunOverAll <- function( FUNC, CompletenessCutoff = 0.4, all_df, StudyCells_Filt_BOTH , ...){
@@ -217,7 +217,7 @@ AllThree_All<-RunOverAll(Find_all_fits_splLvl,
 write_csv( AllThree_All, '../Results/AllThree_All.csv')
 ```
 
-## Further filterring 
+## Further filtering 
 
 Identifying assemblages with very few species per sample and removing them. This largely removes assemblages from irregularly visited opportunistic data 
 
@@ -378,7 +378,7 @@ Randomisations <- read_csv( '../Results/Randomisations10k.csv')
 ```
 
 
-### Overall (trait level) Quantilie boundaries
+### Overall (trait level) Quantile boundaries
 
 ```{r warning = FALSE, message =FALSE}
 
@@ -584,8 +584,8 @@ ggsave('../Plots/DotPlots2.pdf', DotPlots,width = 10, height = 6)
 ```{r}
 AllThree_All_cut %>%
   select( `Transformation A` = D19_slope,
-          `Transformation B` = Slope,
-          `Transformation C` = Elas_slope)-> Data4Corr
+          `Transformation B` = Elas_slope,
+          `Transformation C` = Slope)-> Data4Corr
 
 
 cor(Data4Corr[,-1],use = 'pairwise') -> CorrTable
@@ -614,7 +614,7 @@ ggsave( '../Plots/CrossTrans_CorInSlopes.pdf', CrossTrans_CorInSlopes, height = 
 
 ```
 
-## Comparision of study-level distribution
+## Comparison of study-level distribution
 
 ```{r}
 
@@ -1146,11 +1146,9 @@ ggsave( '../Plots/SplitMap3.pdf',plot = Map3, width = 7, height = 7, device = ca
 ```
 
 
-# Summary stats for paper
+# Summary statistics
 
-Calaculation of statistics covering the scope of the final data used. NB 
-
-Before the new tighter filtering procedure:
+Calculation of statistics covering the scope of the final data used. NB, before the new tighter filtering procedure:
  *22,915  community time series from 167 studies, representing 2,516,175 observations of 12,033 species, of which 8,238 could be linked to at least one ‘size’ trait (representing 84.6% of observations). Equally weighting studies, the average time series length was 17.2 years (range 5-70.5) and the average number of species per included assemblage was 56.7 (range 10-337)*
 
 

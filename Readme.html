@@ -421,20 +421,19 @@ summary {
 <div id="scripts" class="section level3">
 <h3>Scripts</h3>
 <p>There are 5 principal scripts that generate the results in the paper from various external databases. These are .rmd files, and are accompanied with ‘knitted’ .html outputs that include the results within them.</p>
-<p>Role of scripts:</p>
 <ol style="list-style-type: decimal">
 <li>Generates assemblages from the raw BioTIME data by grouping dispersed studies into cells</li>
 <li>Cleans the names assigned to records in BioTIME by cross-referencing with GBIF taxonomic backbone</li>
 <li>Gathers trait data for these species from a variety of sources</li>
 <li>Conducts the analyses described in the paper</li>
 </ol>
-<p>The key functions to transform the populaiton data and calculate the slopes as described in the paper are stored in <code>FitThreeApproaches.R</code></p>
+<p>The key functions to transform the population data and calculate the slopes as described in the paper are stored in <code>FitThreeApproaches.R</code></p>
 <p><code>ExtendedData.rmd</code> makes additional cosmetic changes to generate the extended data tables and figures.</p>
 </div>
 <div id="data-tables" class="section level3">
 <h3>Data Tables</h3>
 <p>Core data files that are archived elsewhere (the BioTIME database of community dynamics, the database of amniote life history traits, the fish database) are not re-hosted here, but are linked to in the scripts. Equally we do not include the raw trait data downloaded from TRY or WoRMS.</p>
-<p>For reproducibility of our work, we do however, include the final trait tables as <code>bt_names_all_traits.csv</code> and the BioTIME metadata table for ease of reference. The derived files <code>bt_grid_collate_filter.csv</code> and <code>bt_grid_collate_filter_tidy.csv</code> are compressed into a .zip to fit on GitHub.</p>
+<p>For reproducibility of our work, we do however include the final trait tables as <code>bt_names_all_traits.csv</code> and the BioTIME metadata table for ease of reference. The derived files <code>bt_grid_collate_filter.csv</code> and <code>bt_grid_collate_filter_tidy.csv</code> are compressed into a .zip to fit on GitHub.</p>
 <p>We include the various downloaded tables of species record names that we used in the <code>NameTables</code> folder.</p>
 <p><code>Study_Corr_Predictors.csv</code> details the final ‘<span class="math inline">\(\tau\)</span>’ values associates with each trait-study combination as presented in the principal figures.</p>
 </div>
@@ -443,7 +442,7 @@ summary {
 <h2>Authorship, Reuse and Licensing</h2>
 <p>Code in this repository was written by Chris Terry (Queen Mary University of London), with some parts derived from other authors as mentioned in-line.</p>
 <p>Feel free to use the code in this repository any way you wish, although a citation to the accompanying paper would always be welcome if relevant. Do be aware that I only attempt to link traits to species from communities with a large amount of data (as detailed in the paper), so other users may wish to repeat the process and conduct additional cleaning if they are asking different questions with a lower data requirement threshold. Equally, taxonomy is a moving target and databases are always improving.</p>
-<p>However, note that much of the original data used is subject to some kind of restrictions, principally the requirement to cite back to the original compilations. Please do consult their requirements for data-reuse. The ‘raw’ data included in this repository is for the purpose of reproducibility and in most cases other users should return the original sources.</p>
+<p>However, note that much of the original data used is subject to some kind of restrictions, normally the requirement to cite back to the original data compilations. Please do consult their requirements for data-reuse. The ‘raw’ data included in this repository is for the purpose of reproducibility and in most cases other users should return the original sources.</p>
 </div>
 </div>
 

@@ -73,7 +73,7 @@ Study_level_signifs %>%
 \newpage
 
 
-**Extended Data Table 1** Full statistical results of linear models for the putative study-level drivers of $\tau$. Each trait (apart from Qualitataive body size, for which there were too few studies for a meaningful test) was tested independently and no corrections were made to the reported values for multiple comparisons. There was no consistent drivers - while certain relationships were identified as significant at p<0.05 (highlighted in **bold**), these were not consistent across traits and had low explanatory power in all cases except Fish (as discussed in the main text).
+**Extended Data Table 1** Full statistical results from linear model analysis of putative study-level drivers of $\tau$. Each trait (apart from `Qualitative body size', for which there were too few studies for a meaningful test) was tested independently and no corrections were made to the reported values for multiple comparisons. There was no consistent drivers - while certain relationships were identified as significant at p<0.05 (highlighted in **bold**), these were not consistent across traits and had low explanatory power (adjusted-$R^2$) in all cases except Fish (as discussed in the main text).
 
 
 ```{r}
@@ -118,7 +118,7 @@ JustData%>%
 ```
 
 
-**Extended Data Table 2** Full statistical results of tests for the drivers of $\tau^2$, in order to test if there are drivers for deviations from trait-neutrality. Each trait was tested independently and no corrections were made to the reported values for multiple comparisons. Here also, there were no consistent drivers.
+**Extended Data Table 2** Full statistical results of tests for the drivers of $\tau^2$, in order to test if there are drivers for deviations from trait-neutrality. Each trait was tested independently and no corrections were made to the reported values for multiple comparisons. Here too there were no consistent drivers.
 
 ```{r}
 load('../SIdata/TableS3_dirty')
@@ -168,7 +168,7 @@ include_graphics(path = "../Plots/SpeciesLevelPlots.pdf")
 **Extended Data Figure 3** Species level likelihood that a populations trend is identifiable as a 'winner' or 'loser' based on the sign and significance (p<0.1) of a regression line of the transformed abundance against time. Compared to the analysis in the main text (which effectively weights each study equally), this analysis weights each species in each study equally. Species from across the whole dataset are binned along the x-axis by their relative trait value within their assemblage. Because the 'Qualitative Body Size' trait has only a limited number of categories, some relative trait ranks did not occur. Where a species is observed in multiple assemblages within a study, the contribution of each time series is downweighted so that each species contributes equally for each study it is in. 
 
 
-**Extended Data Table 3** Total counts of the number species in each category for each trait. Species that are found in multiple studies are counted each time. Where species have different trends in different cells within a study they are assigned fractionally. For example, a species that was observed in 10 assemblages within a study, and was observed to be a 'winner' in two and 'no clear trend' in eight is counted as 0.2 of a winner and 0.8 of no trend. 
+**Extended Data Table 3** Total counts of the number of species in each category for each trait. Species that are found in multiple studies are counted each time. Where species have different trends in different cells within a study they are assigned fractionally. For example, a species that was observed in 10 assemblages within a study, and was observed to be a 'winner' in two and 'no clear trend' in eight is counted as 0.2 of a winner and 0.8 of no trend. 
 
 ```{r}
 
@@ -190,7 +190,7 @@ WinLossAll %>%
 ```
 
 
-**Extended Data Table 4** Statistical results of the predictive capacity of relative trait rank within an assemblage for the assignment to either 'winner' or 'loser'. Test was a logistic regression, weighted by the reciprocal of the number of cells within a study that include the species. Coefficient estimates are shown on the transformed scale. Separate models were fit for each trait and outcome and no corrections were made for multiple comparisons.
+**Extended Data Table 4** Statistical results demonstrating the lack of a significant relationship between the relative trait rank within an assemblage and the assignment to either 'winner' or 'loser' categories. Each test was a logistic regression, weighted by the reciprocal of the number of cells within a study that include the species. Coefficient estimates are shown on the transformed scale. Separate models were fit for each trait and direction of trend, and no corrections were made for multiple comparisons.
 
 
 ```{r}
@@ -216,12 +216,12 @@ LogRegStats %>%
 
 \newpage
 
-# Comparision of Transformations - Figure 4, Figure 5
+# Comparison of Transformations - Figure 4, Figure 5
 
 ![](../Plots/CrossTrans_CorInSlopes.png)
 
 
-**Extended Data Figure 4** Strong correlation between all trend slopes ($\beta$'s) calculated using alternative population data transformations. Transformation A is that presented in the main text results, Transformation B is the rank based approach and Transformation C is the standardisation by dividing by the mean population values. Correlations shown are Pearson's correlation coefficients.   
+**Extended Data Figure 4** Strong correlation between all trend slopes ($\beta$'s) calculated using alternative population data transformations. Transformation A is that presented in the main text results, Transformation B is the standardisation by dividing by the mean population values, and Transformation C is the rank based approach.   Correlations shown are Pearson's correlation coefficients.   
 
 
 
@@ -230,7 +230,7 @@ include_graphics(path = "../Plots/ComparisonDotplots.pdf")
 ```
 
 
-**Extended Data Figure 5** Strong concordance of overall results under different data transformations. All three show the same pattern of trait-level significance. 
+**Extended Data Figure 5** Strong concordance of overall results  under different data transformations. Figure elements are the same as in the main text Figure 2. The red dotted line shows the mean $\tau$ value in each facet. All three transformations show the same pattern of trait-level significance - the only guild where a significant (positive) deviation from the null distribution (bar under histograms) is detectable is the amniotes. 
 
 
 
@@ -241,7 +241,7 @@ include_graphics(path = "../Plots/ComparisonDotplots.pdf")
 
 **Extended Data Figure 6** Further details of degree of overlap and correspondence between traits. a) Number of species that could be related to at least one trait from the four sources. b) Overlap within the WoRMS database between the quantitative and qualitative body lengths was relatively low. In cases where the data was available on both categories, the Spearman's rank correlation was 0.65. c) Very strong correlation between the size traits for species that had data in both the WoRMS and the FishBase databases. d) Overlap in trait data between then plant species held in the TRY database was comparatively high. e) Correlation between the seed mass and vegetative height trait values was moderate, and considerably less within guilds. 
 
-```{r}
+```{r fig.height=7}
 include_graphics(path = "../Plots/Venn_GoodLabels.pdf")
 ```
 
@@ -254,7 +254,7 @@ include_graphics(path = "../Plots/Venn_GoodLabels.pdf")
 
 ```{r}
 read_csv('../Results/Study_Corr_Predictors.csv')%>%                                                                                        
-  left_join(select( read_csv('../SIdata/BioTIMEMetadata_02_04_2018.csv'), 
+  left_join(select( read_csv('../BT_Tables/BioTIMEMetadata_02_04_2018.csv'), 
                     STUDY_ID, TITLE, WEB_LINK,CENT_LAT,CENT_LONG,ABUNDANCE_TYPE,BIOMASS_TYPE  ),
             by = "STUDY_ID") %>%
   arrange( Trait, Tau) %>%
