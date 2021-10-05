@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Introduction
 
-This script calculates the main results for version 2 of the manuscript. It outputs the figures for the main text and a variety of summary statistics. NB the extended data document is generated in a seperate .rmd file.
+This script calculates the main results for version 3 of the manuscript. It outputs the figures for the main text and a variety of summary statistics. NB the extended data document is generated in a seperate .rmd file.
 
 ```{r message = FALSE}
 library(tidyverse)
@@ -700,8 +700,7 @@ A suite of potential drivers, 'statistical' and 'ecological' were generated for 
 - Year Range (i.e time span of the time series) 
 - Trait Completeness (fraction of species with trait data)
 - Number of cells 
-
-Study_MeanAbsRankChange
+- Range of traits in the community (range of log-trait values, and 95% winsorised log-trait range)
 
 As well as additional values from the original BioTIME metadata
 
@@ -709,7 +708,7 @@ As well as additional values from the original BioTIME metadata
 - Latitude (absolute)
 - Protected area status (as listed in BioTIME)
 
-The relationships with $\tau$ are shown in Figure XXX. Linear models of these predictors (except study grain due to NA's)
+The relationships with $\tau$ are shown in the Figure below. Linear models of these predictors (except study grain due to NA's)
 
 
 ```{r warning = FALSE, message =FALSE}
@@ -745,8 +744,33 @@ AllThree_All_cut %>%
   group_by(STUDY_ID ,  trait  ) %>%
   summarise(Study_MeanAbsRankChange= mean( Assem_MeanAbsRankChange) )-> Study_MeanAbsRankChange
 
+ 
+# ### Trait Ranges
+
+Winsorize <- function (x, probs = c(0.05, 0.95)) { ## DescTools::Winsorize
+  xq <- quantile(x = x, probs = probs, na.rm = TRUE, type = 7)
+  minval <- xq[1L]
+  maxval <- xq[2L]
+  x[x < minval] <- minval
+  x[x > maxval] <- maxval
+  return(x)
+}
 
 
+AllThree_All_cut3%>% 
+  group_by(STUDY_ID_CELL, trait ) %>%
+  mutate(TrimmedTrait_value = Winsorize(trait_value) )%>%
+  summarise( MIN= min(trait_value , na.rm=TRUE),
+             MAX = max(trait_value, na.rm=TRUE),
+             MIN_trim= min(TrimmedTrait_value , na.rm=TRUE),
+             MAX_trim = max(TrimmedTrait_value, na.rm=TRUE))%>%
+  mutate( OrdersOfMag_Range = ifelse(  trait         ==   'TR_Mean_SeedMass',
+                                       MAX-MIN, 
+                                       log10(MAX) - log10(MIN)),
+           OrdersOfMag_Range_trim = ifelse(  trait         ==   'TR_Mean_SeedMass',
+                                       MAX_trim-MIN_trim, 
+                                       log10(MAX_trim) - log10(MIN_trim)))%>%
+  select( STUDY_ID_CELL, trait, OrdersOfMag_Range, OrdersOfMag_Range_trim ) -> TraitRanges
 
 
 ### Just take the assemblages that were actually used:
@@ -757,7 +781,8 @@ AllThree_All_cut %>%
   rename(Trait = trait) %>%
   #filter( STUDY_ID_CELL  =='10_359170'           ) %>%
   left_join(AssemblageTraitCompleteness ,  by = c("STUDY_ID_CELL", "STUDY_ID", "Trait")) %>%
-  left_join(Assemblage_Stats,  by = c("STUDY_ID_CELL"))-> AllAssemblageLevelStats
+  left_join(Assemblage_Stats,  by = c("STUDY_ID_CELL"))%>%
+  left_join(TraitRanges, by = c("STUDY_ID_CELL", 'Trait' = 'trait')) -> AllAssemblageLevelStats
 
 
 
@@ -767,6 +792,8 @@ AllAssemblageLevelStats %>%
              Mean_Sp_div = mean(SpDiversity ) ,
              Mean_N_Years = mean(N_Years),
              Mean_Completeness = mean(Completeness),
+             Mean_TraitRange = mean(OrdersOfMag_Range),
+             Mean_TraitRange_Trim = mean(OrdersOfMag_Range_trim),
              Mean_YearRange = mean(YearRange  )) %>%
   left_join(select(bt_meta,## Values direct from BioTIME metadata:
                    STUDY_ID  ,TITLE , REALM,  CLIMATE,PROTECTED_AREA ,
@@ -781,6 +808,51 @@ AllAssemblageLevelStats %>%
 
 ```
 
+### Effect of trait range
+
+
+```{r}
+StudyExplanators %>%
+  left_join( Three_Taus, by = c("STUDY_ID", 'Trait' = 'trait')) %>% 
+    filter( Trait != 'TR_QualBS_Numeric' ) %>%
+  ggplot( aes ( x = Mean_TraitRange, y =D19_Tau  ))+
+  geom_point()+
+  facet_grid(~Trait, scales = 'free_x')+
+  ylab('Size-Trait - Popn Trend\nCorrelation') +
+  xlab('Trait Range (Orders of magnitude)') +
+  ggtitle( 'Un-Trimmed')+
+  geom_hline(yintercept = 0)+
+  coord_cartesian(xlim = c(0,NA))
+
+StudyExplanators %>%
+  left_join( Three_Taus, by = c("STUDY_ID", 'Trait' = 'trait')) %>% 
+  filter( Trait != 'TR_QualBS_Numeric' ) %>%
+  ggplot( aes ( x = Mean_TraitRange_Trim, y =D19_Tau  ))+
+  geom_point()+
+  facet_grid(~Trait, scales = 'free_x')+
+  ylab('Size-Trait - Popn Trend\nCorrelation') +
+  xlab('Trait Range (Orders of magnitude)') +
+  ggtitle( 'Trimmed (only central 90% kept)')+
+  geom_hline(yintercept = 0)+
+  coord_cartesian(xlim = c(0,NA))
+
+
+### 'Trait Range' Range (Masses)
+StudyExplanators %>%
+  filter( Trait %in% c( "TR_adult_body_mass_g" ,"TR_Mean_SeedMass" )) %>% 
+  summarise(mean(Mean_TraitRange), 
+            median(Mean_TraitRange),
+            min(Mean_TraitRange),
+            max(Mean_TraitRange))
+
+### 'Trait Range' Range (lengths/heights)
+StudyExplanators %>%
+  filter( Trait %in% c( "TR_BodyLength_mm", "TR_Mean_LengthMax" ,  "TR_Max_Height"))%>% 
+  summarise(mean(Mean_TraitRange), 
+            median(Mean_TraitRange),
+            min(Mean_TraitRange),
+            max(Mean_TraitRange))
+```
 
 
 ```{r  warning = FALSE, message =FALSE}
@@ -793,6 +865,7 @@ StudyExplanators %>%
          Mean_Sp_div,
          Mean_N_Years,
          Mean_Completeness,
+         Mean_TraitRange,
          #    Study_MeanAbsRankChange ,
          Mean_YearRange,
          PROTECTED_AREA,
@@ -811,25 +884,51 @@ StudyExplanators4Stats %>%
                         "TR_Max_Height"="Plants: Maximum Height"  )) %>%
   mutate( predictor = recode(predictor ,
                              'CENT_LAT' =  'Latitude',
-                             'GRAIN_SQ_KM_Log' = 'Sampling Grain (log10)',
+                             'GRAIN_SQ_KM_Log' = 'Sampling Grain\n(log10)',
                              'Mean_YearRange' = 'Year Range',
                              "Mean_Completeness"='Trait Completeness',
                              "Mean_N_Years" =   'Years Sampled' ,
                              #  'Study_MeanAbsRankChange' = 'Average Rank Change', 
+                             'Mean_TraitRange' = 'Trait Range\n(Orders of Magnitude)',
                              "Mean_Sp_div"= 'Species Richness',
                              'Abs_Lat' = 'Absolute Latitude' ,
-                             "LogCells"= 'Number of Cells (log10)',
-                             "PROTECTED_AREA"="Protected Area "  )) %>% 
+                             "LogCells"= 'Number of Cells\n(log10)',
+                             "PROTECTED_AREA"="Protected Area"  )) -> TauPredictorsPlotData
+  
+PlotA <- c('Sampling Grain\n(log10)','Year Range',
+           'Trait Completeness','Years Sampled')
+
+PlotB <- c(  'Trait Range\n(Orders of Magnitude)',
+             'Species Richness', 'Absolute Latitude' ,
+             'Number of Cells\n(log10)', "Protected Area")
+
+
+ TauPredictorsPlotData %>% 
+  filter( predictor %in% PlotA) %>% 
   ggplot(aes(value,Study_Tau))+
-  # geom_smooth(se=FALSE)+
   geom_point()+
   ylab('tau')+
   xlab('Predictor Value')+
-  facet_grid(Trait~predictor ,scales = 'free') -> TauPredictorsPlot
+   ggtitle('a)')+
+  facet_grid(Trait~predictor ,scales = 'free') -> TauPredictorsPlotA
 
-TauPredictorsPlot
+TauPredictorsPlotA
 
-ggsave('../Plots/TauPredictorsPlot.png', TauPredictorsPlot, width = 14, height =11)
+
+ TauPredictorsPlotData %>% 
+  filter( predictor %in% PlotB) %>%
+  ggplot(aes(value,Study_Tau))+
+  geom_point()+
+  ylab('tau')+
+  xlab('Predictor Value')+
+      ggtitle('b)')+
+  facet_grid(Trait~predictor ,scales = 'free') -> TauPredictorsPlotB
+
+TauPredictorsPlotB
+
+
+ggsave('../Plots/TauPredictorsPlotA.png', TauPredictorsPlotA, width = 14, height =11)
+ggsave('../Plots/TauPredictorsPlotB.png', TauPredictorsPlotB, width = 14, height =11)
 
 ```
 
@@ -844,16 +943,16 @@ StudyExplanators4Stats %>%
 
 # Full Raw results tables 
 
-# A table of trait/study level results is available as 'Study_Corr_Predictors.csv'
+# NB A table of trait/study level results is available as 'Study_Corr_Predictors.csv'
 
 Data_4_Predictions %>%
   write_csv('../Results/Study_Corr_Predictors.csv') ## for extended data. 
 
-FF <- Tau~   LogCells+ Mean_Sp_div +Mean_N_Years +Mean_YearRange+ Abs_Lat+ Mean_Completeness #+Study_MeanAbsRankChange
+FF <- Tau~   LogCells+ Mean_Sp_div +Mean_N_Years +Mean_YearRange+ Mean_TraitRange + Abs_Lat+ Mean_Completeness   #+Study_MeanAbsRankChange
 
 Pred_Labels <-  c('Intercept','Species Richness', 
                   'Number of Cells (Log 10)', 
-                  'Years Sampled', 'Year Range', 
+                  'Years Sampled', 'Year Range', 'Trait Range', 
                   'Absolute Latitude' ,'Trait Completeness' #,  'Average Rank Change'
 )
 
@@ -872,7 +971,7 @@ TableS2<- sjPlot::tab_model(M1,  M3, M4, M5, M6, title = 'Predictors for τ with
                             dv.labels  =TidyName[c(1,3:6)], digits = 4) 
 TableS2
 
-FF2 <- Tau^2~  LogCells+ Mean_Sp_div +Mean_N_Years +Mean_YearRange+ Abs_Lat+ Mean_Completeness#+Study_MeanAbsRankChange
+FF2 <- Tau^2~  LogCells+ Mean_Sp_div +Mean_N_Years +Mean_YearRange+  Mean_TraitRange +Abs_Lat+ Mean_Completeness   #+Study_MeanAbsRankChange
 
 
 M1_2 <- lm(FF2,   data = filter(Data_4_Predictions,  Trait == TraitNames[1], !is.na( Tau)) ) 
@@ -1199,13 +1298,6 @@ range(StudyExplanators4Stats$Mean_Sp_div)
 
 
 ```
-
-
-
-
-
-
-
 
 
 

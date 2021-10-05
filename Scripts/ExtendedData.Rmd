@@ -45,6 +45,7 @@ Study_level_signifs %>%
           significant  = recode(significant , 'zInsig'  = ''),
           STUDY_ID = factor(STUDY_ID)) %>%
   ggplot( aes(y =   STUDY_ID))+
+  geom_vline(xintercept = 0, linetype = 2, colour = 'grey')+
   geom_errorbarh(aes(xmin= Bottom_025,  xmax =Top_975), height = 0)+
   geom_errorbarh(aes(xmin= bottomsixth       ,  xmax =topsixth ), size = 1.5,height = 0)+
   geom_point( aes(Tau , fill =significant ), shape = 21, size =2.15)+
@@ -66,14 +67,20 @@ Study_level_signifs %>%
 
 
 
-![](../Plots/TauPredictorsPlot.png)
-**Extended Data Figure 2** No consistent relationships between the suite of study-level predictors and the principal response variable $\tau$. Statistical results are given in Extended Data Tables 2 and 3. 
+![](../Plots/TauPredictorsPlotA.png)
+
+**Extended Data Figure 2a** No consistent relationships between the suite of study-level predictors and the principal response variable $\tau$. Statistical results are given in Extended Data Tables 2 and 3. Figure is split into two parts a) and b) to fit within page boundaries. 
+
+
+![](../Plots/TauPredictorsPlotB.png)
+
+**Extended Data Figure 2b** No consistent relationships between the suite of study-level predictors and the principal response variable $\tau$. Statistical results are given in Extended Data Tables 2 and 3. Figure is split into two parts a) and b) to fit within page boundaries. 
 
 
 \newpage
 
 
-**Extended Data Table 1** Full statistical results from linear model analysis of putative study-level drivers of $\tau$. Each trait (apart from `Qualitative body size', for which there were too few studies for a meaningful test) was tested independently and no corrections were made to the reported values for multiple comparisons. There was no consistent drivers - while certain relationships were identified as significant at p<0.05 (highlighted in **bold**), these were not consistent across traits and had low explanatory power (adjusted-$R^2$) in all cases except Fish (as discussed in the main text).
+**Extended Data Table 1** Linear model analysis of putative study-level predictors of size trait – population trend correlations ($\tau$). We tested each trait separately, except ‘Qualitative body size’, for which there were too few studies for a meaningful test. No corrections were made to the reported values for multiple comparisons. There were no consistent drivers - while certain relationships between possible predictor variables were identified as significant at p<0.05 (highlighted in **bold**), these were not consistent across the set of traits and had low explanatory power (adjusted-$R^2$) in all cases except Fish (as discussed in the main text).
 
 
 ```{r}
@@ -85,7 +92,7 @@ JustData<- as.data.frame(TableS2_dirty[,-1])
 
 
 rownames(JustData ) <- c('Intercept', 'Species Richness',  'Number of Cells (Log10)',
-                          'Years Sampled', 'Year Range', 
+                          'Years Sampled', 'Year Range', 'Trait Range',
                          'Absolute Latitude' , 
                          'Trait Completeness' , 
                          'Observations' , 'Adjusted R-squared')
@@ -126,7 +133,7 @@ load('../SIdata/TableS3_dirty')
 JustData<- as.data.frame(TableS3_dirty[,-1])
 
 rownames(JustData ) <- c('Intercept', 'Species Richness',  'Number of Cells (Log10)',
-                          'Years Sampled', 'Year Range', 
+                          'Years Sampled', 'Year Range', 'Trait Range',
                          'Absolute Latitude' , 
                          'Trait Completeness' , 
                          'Observations' , 'Adjusted R-squared')
@@ -190,7 +197,7 @@ WinLossAll %>%
 ```
 
 
-**Extended Data Table 4** Statistical results demonstrating the lack of a significant relationship between the relative trait rank within an assemblage and the assignment to either 'winner' or 'loser' categories. Each test was a logistic regression, weighted by the reciprocal of the number of cells within a study that include the species. Coefficient estimates are shown on the transformed scale. Separate models were fit for each trait and direction of trend, and no corrections were made for multiple comparisons.
+**Extended Data Table 4** Results from logistic regressions seeking to determine if the relative trait rank within an assemblage predicts the likelihood of an identifiable population level trend. Separate analyses were carried out for  ‘winner’ and ‘loser’ categories. Each test was a logistic regression, weighted by the reciprocal of the number of cells within a study that include the species. Coefficient estimates are shown on the transformed scale. Separate models were fit for each trait and direction of trend, and no corrections were made for multiple comparisons.
 
 
 ```{r}
@@ -204,12 +211,23 @@ LogRegStats %>%
                          "TR_Mean_SeedMass"="Plants: Seed Mass",
                          "TR_Max_Height"="Plants: Maximum Height"  )) %>%
   select( Trait,  `Coefficent estimate` = estimate, SE = std.error, p.value , Response) %>%
-  pivot_wider(id_cols= Trait,  names_from = Response , values_from = c(`Coefficent estimate`  ,  SE ,p.value))  %>%
-  kbl(digits = 3, align = 'lcccccc',
-      col.names = c('Trait', rep(c('Coefficient estimate', 'SE', 'p-value'),2  ))) %>%
+  pivot_wider(id_cols= Trait,  names_from = Response ,
+              values_from = c(`Coefficent estimate`  ,  SE ,p.value)) -> ExDataTable4
+
+ExDataTable4%>%
+  select( 1:4) %>%
+  kbl(digits = 3, align = 'lccc',
+      col.names = c('Trait','Coefficient estimate', 'SE', 'p-value')) %>%
   add_header_above(c(" ",
-                     "Likelihood of being `Winner'" = 3,
+                     "Likelihood of being `Winner'" = 3)) 
+
+ExDataTable4%>%
+  select( 1, 5:7) %>%
+  kbl(digits = 3, align = 'lccc',
+      col.names = c('Trait','Coefficient estimate', 'SE', 'p-value')) %>%
+  add_header_above(c(" ",
                      "Likelihood of being `Loser'" = 3)) 
+
 
 ```
 
@@ -217,13 +235,11 @@ LogRegStats %>%
 \newpage
 
 # Comparison of Transformations - Figure 4, Figure 5
-
 ![](../Plots/CrossTrans_CorInSlopes.png)
-
 
 **Extended Data Figure 4** Strong correlation between all trend slopes ($\beta$'s) calculated using alternative population data transformations. Transformation A is that presented in the main text results, Transformation B is the standardisation by dividing by the mean population values, and Transformation C is the rank based approach.   Correlations shown are Pearson's correlation coefficients.   
 
-
+\newpage
 
 ```{r}
 include_graphics(path = "../Plots/ComparisonDotplots.pdf")
@@ -241,7 +257,7 @@ include_graphics(path = "../Plots/ComparisonDotplots.pdf")
 
 **Extended Data Figure 6** Further details of degree of overlap and correspondence between traits. a) Number of species that could be related to at least one trait from the four sources. b) Overlap within the WoRMS database between the quantitative and qualitative body lengths was relatively low. In cases where the data was available on both categories, the Spearman's rank correlation was 0.65. c) Very strong correlation between the size traits for species that had data in both the WoRMS and the FishBase databases. d) Overlap in trait data between then plant species held in the TRY database was comparatively high. e) Correlation between the seed mass and vegetative height trait values was moderate, and considerably less within guilds. 
 
-```{r fig.height=7}
+```{r out.height='7in'}
 include_graphics(path = "../Plots/Venn_GoodLabels.pdf")
 ```
 
@@ -249,46 +265,70 @@ include_graphics(path = "../Plots/Venn_GoodLabels.pdf")
 
 # List of Studies - Table 6
 
-**Extended Data Table 6** - List of studies used from BioTIME, including key statistics and description. Studies are ordered by trait, then by $\tau$. If a study could be linked to multiple traits, it will therefore appear multiple times.  Note this table is also available in .csv format (`Study_Corr_Predictors.csv`) with the code supplement. ID numbers correspond to the BioTIME database, and columns 'Latitude' to 'Data Source' are directly drawn from the BioTIME metadata. Further metadata (including descriptions of original sampling methods) are available from the original BioTIME metadata sources. 
-
+**Extended Data Table 6** - List of studies used from BioTIME. Studies are ordered by trait, then by $\tau$. If a study could be linked to multiple traits, it will therefore appear multiple times.  Note this table is also available in .csv format (`Study_Corr_Predictors.csv`) with the code supplement, which also includes other descriptors of each study. ID numbers correspond to the BioTIME database, and titles and sources are directly drawn from the BioTIME metadata. Further metadata (including descriptions of original sampling methods) are available from the original BioTIME metadata sources. 
 
 ```{r}
-read_csv('../Results/Study_Corr_Predictors.csv')%>%                                                                                        
-  left_join(select( read_csv('../BT_Tables/BioTIMEMetadata_02_04_2018.csv'), 
+# read_csv('../Results/Study_Corr_Predictors.csv')%>%
+#   left_join(select( read_csv('../BT_Tables/BioTIMEMetadata_02_04_2018.csv'), 
+#                     STUDY_ID, TITLE, WEB_LINK,CENT_LAT,CENT_LONG,ABUNDANCE_TYPE,BIOMASS_TYPE  ),
+#             by = "STUDY_ID") %>%
+#   arrange( Trait, Tau) %>%
+#   mutate( Trait = recode(Trait , "TR_BodyLength_mm"="Marine:  Body Length",
+#                          "TR_QualBS_Numeric" = "Marine: Qualitative Body Size" ,
+#                          "TR_Mean_LengthMax"= "Fish: Maximum Length",
+#                          "TR_adult_body_mass_g"= "Amniotes: Adult body mass",
+#                          "TR_Mean_SeedMass"="Plants: Seed Mass",
+#                          "TR_Max_Height"="Plants: Maximum Height"  ))%>%
+#   mutate(Mean_YearRange = round(Mean_YearRange,1),
+#          Mean_Sp_div = round(Mean_Sp_div,1),
+#          Cells = round(10^LogCells,0),
+#          Mean_Completeness = round(Mean_Completeness*100,2) )%>%
+#   select('Trait tested' = Trait,
+#          'ID' = STUDY_ID ,
+#          Tau,
+#          'N. Sp.' = Mean_Sp_div,
+#          'N. Years'  =Mean_N_Years,
+#          'Trait %'= Mean_Completeness ,
+#          'Year Span' = Mean_YearRange ,
+#          'N. Cells' = Cells,
+#          'Latitude' = CENT_LAT,
+#          'Longitude' = CENT_LONG,
+#          'Abundance' = ABUNDANCE_TYPE,
+#          'Biomass' = BIOMASS_TYPE,
+#          'Study Title' = TITLE,
+#          'Data Source' = WEB_LINK )%>%
+#   kbl(digits = 3, longtable = TRUE, ) %>%
+#   kable_styling(latex_options =c("repeat_header"), font_size =5) %>%
+#   landscape()%>%
+#   column_spec(13, width = "15em" )%>%
+#   column_spec(14, width = "10em" )%>%
+#   column_spec(4, width = "5em") %>%
+#   column_spec(1, width = "10em")
+
+read_csv('../Results/Study_Corr_Predictors.csv')%>%
+  left_join(select( read_csv('../BT_Tables/BioTIMEMetadata_02_04_2018.csv'),
                     STUDY_ID, TITLE, WEB_LINK,CENT_LAT,CENT_LONG,ABUNDANCE_TYPE,BIOMASS_TYPE  ),
+            by = "STUDY_ID") %>%
+  left_join(read_csv('../BT_Tables/BioTIMECitations_24_06_2021_UTF.csv' ),
             by = "STUDY_ID") %>%
   arrange( Trait, Tau) %>%
   mutate( Trait = recode(Trait , "TR_BodyLength_mm"="Marine:  Body Length",
-                         "TR_QualBS_Numeric" = "Marine: Qualitative Body Size" ,
+                         "TR_QualBS_Numeric" = "Marine: Qual. Body Size" ,
                          "TR_Mean_LengthMax"= "Fish: Maximum Length",
                          "TR_adult_body_mass_g"= "Amniotes: Adult body mass",
                          "TR_Mean_SeedMass"="Plants: Seed Mass",
                          "TR_Max_Height"="Plants: Maximum Height"  ))%>%
-  mutate(Mean_YearRange = round(Mean_YearRange,1),
-         Mean_Sp_div = round(Mean_Sp_div,1),
-         Cells = round(10^LogCells,0),
-         Mean_Completeness = round(Mean_Completeness*100,2) )%>%
   select('Trait tested' = Trait,
          'ID' = STUDY_ID ,
          Tau,
-         'N. Sp.' = Mean_Sp_div,
-         'N. Years'  =Mean_N_Years,
-         'Trait %'= Mean_Completeness ,
-         'Year Span' = Mean_YearRange ,
-         'N. Cells' = Cells,
-         'Latitude' = CENT_LAT,
-         'Longitude' = CENT_LONG,
-         'Abundance' = ABUNDANCE_TYPE,
-         'Biomass' = BIOMASS_TYPE,
          'Study Title' = TITLE,
-         'Data Source' = WEB_LINK )%>%
-  kbl(digits = 3, longtable = TRUE, ) %>%
-  kable_styling(latex_options =c("repeat_header"), font_size =5) %>%
-  landscape()%>%
-  column_spec(13, width = "15em" )%>%
-    column_spec(14, width = "10em" )%>%
-  column_spec(4, width = "5em") %>%
-  column_spec(1, width = "10em")
-
+      #   'Data Source' = WEB_LINK,
+         'Citation' =CITATION_LINE    )%>%
+  #  mutate( `Data Source` = gsub("(.{50})", "\\1 ", `Data Source`))%>%
+  kbl(digits = 3, longtable = TRUE) %>%
+  kable_styling(latex_options =c("repeat_header"), font_size =5)%>%
+  column_spec(4, width = "20em" )%>%
+  #  landscape()%>%
+  column_spec(5, width = "40em" )
 
 ```

@@ -6,7 +6,7 @@ Analysis scripts and raw data to support Terry et al. (2021) *No pervasive size 
 
 ### Scripts
 
-There are 5 principal scripts that generate the results in the paper from various external databases. These are .rmd files, and are accompanied with 'knitted' .html outputs that include the results within them.
+There are 5 principal scripts that generate the results in the paper from various external databases. These are .rmd files, and are accompanied with 'knitted' .html outputs that include the results within them (in the `KnittedScripts/` folder).
 
 1. Generates assemblages from the raw BioTIME data by grouping dispersed studies into cells
 2. Cleans the names assigned to records in BioTIME by cross-referencing with GBIF taxonomic backbone
