@@ -495,7 +495,10 @@ D19_Study_level_signifs<- Study_level_signifs %>%
 
 write_csv(Study_level_signifs, '../SIdata/Study_level_signifs.csv')
 
+```
 
+
+```{r message = FALSE}
 ## Dot-plot histograms
 
 PlotList <- list()
@@ -523,30 +526,30 @@ for( i in 1:6){
     filter(trait ==TRAIT) %>% 
     left_join(D19_Study_level_signifs , by = c("STUDY_ID", "trait")) %>% 
     ggplot( aes(D19_Tau))+
-    geom_segment( x=0, xend = 0, y = -0.1, yend = 0.6,
+    geom_segment( x=0, xend = 0, y = -0.2, yend = 0.9,
                   col = 'grey60' , size = 0.5)+
+        geom_segment( x=stats$Mean_Tau, xend = stats$Mean_Tau,
+                      y = -0.18, yend = 0.9,# -0.02,
+                  linetype = 'solid', col = 'red' , size = 1.5)+
     geom_dotplot(aes( fill =factor(significant)),
                  binwidth = 0.05, binpositions = 'all',
                  method = 'histodot',
                  origin = 0, stackgroups = TRUE,
-                 alpha = 0.7)   + 
+                 alpha = 1)   + 
     theme(panel.background = element_blank(),
           axis.text.y = element_blank(),
           axis.title.y = element_blank(),
           axis.ticks.y = element_blank())+
-    geom_segment( x=stats$Mean_Tau, xend = stats$Mean_Tau, y = -0.05, yend = 0.5,
-                  linetype = 'dotted', col = 'red' )+
-    
     #   geom_point( y = -0.1,x = stats$Mean_Tau, 
     #              colour = 'blue4', shape = 2)+
-    geom_segment(y= -0.04, yend = -0.04,
+    geom_segment(y= -0.1, yend = -0.1,
                  x = stats$Bottom_025,
                  xend =  stats$Top_975 , 
-                 colour = 'grey')+
-    geom_segment( y= -0.04, yend = -0.04,
+                 colour = 'grey', size = 1.5)+
+    geom_segment( y= -0.1, yend = -0.1,
                   x = stats$bottomsixth,
                   xend =  stats$topsixth , 
-                  size = 2,
+                  size = 3,
                   colour = 'grey25')+
     ggtitle( name, 
              subtitle = stats_dets)+
@@ -557,7 +560,7 @@ for( i in 1:6){
     guides(fill= FALSE)+
     xlab(expression(tau))+
     scale_x_continuous(limits= c(-0.6, 0.6)) +
-    scale_y_continuous(limits= c(-0.05, NA)) +
+    scale_y_continuous(limits= c(-0.2, NA)) +
     coord_cartesian(clip = 'off')  -> XX_dots
   XX_dots
   
@@ -572,8 +575,8 @@ DotPlots<-cowplot::plot_grid(PlotList[[1]],PlotList[[2]],
 DotPlots
 
 
-ggsave('../Plots/DotPlots2.png', DotPlots,width = 10, height = 6)
-ggsave('../Plots/DotPlots2.pdf', DotPlots,width = 10, height = 6)
+ggsave('../Plots/Figure2.pdf', DotPlots,width = 10, height = 6)
+ggsave('../Plots/Figure2.png', DotPlots,width = 10, height = 6)
 
 ```
 
@@ -609,8 +612,8 @@ CrossTrans_CorInSlopes <-plot_grid( nrow = 1, Cor1, Cor2, Cor3)
 
 CrossTrans_CorInSlopes
 
-ggsave( '../Plots/CrossTrans_CorInSlopes.png', CrossTrans_CorInSlopes, height = 2.5, width = 5, dpi = 300,scale =2  )
-ggsave( '../Plots/CrossTrans_CorInSlopes.pdf', CrossTrans_CorInSlopes, height = 2.5, width = 5,scale =2)
+ggsave( '../Plots/ExFigures/Terry_ED_2.jpg', CrossTrans_CorInSlopes,
+        height = 2.5, width = 5, dpi = 500,scale =2  )
 
 ```
 
@@ -676,8 +679,7 @@ Study_level_signifs %>%
 
 ComparisonDotplots 
 
-ggsave( '../Plots/ComparisonDotplots.png', ComparisonDotplots, height = 6, width = 10, dpi = 300)
-ggsave( '../Plots/ComparisonDotplots.pdf', ComparisonDotplots, height = 6, width = 10)
+ggsave( '../Plots/ExFigures/Terry_ED_3.jpg', ComparisonDotplots, height = 6, width = 10, dpi = 500)
 
 ```
 
@@ -909,7 +911,6 @@ PlotB <- c(  'Trait Range\n(Orders of Magnitude)',
   geom_point()+
   ylab('tau')+
   xlab('Predictor Value')+
-   ggtitle('a)')+
   facet_grid(Trait~predictor ,scales = 'free') -> TauPredictorsPlotA
 
 TauPredictorsPlotA
@@ -921,14 +922,13 @@ TauPredictorsPlotA
   geom_point()+
   ylab('tau')+
   xlab('Predictor Value')+
-      ggtitle('b)')+
   facet_grid(Trait~predictor ,scales = 'free') -> TauPredictorsPlotB
 
 TauPredictorsPlotB
 
 
-ggsave('../Plots/TauPredictorsPlotA.png', TauPredictorsPlotA, width = 14, height =11)
-ggsave('../Plots/TauPredictorsPlotB.png', TauPredictorsPlotB, width = 14, height =11)
+ggsave('../Plots/ExFigures/Terry_ED_4.jpg', TauPredictorsPlotA, width = 14, height =11, dpi = 500)
+ggsave('../Plots/ExFigures/Terry_ED_5.jpg', TauPredictorsPlotB, width = 14, height =11, dpi = 500)
 
 ```
 
@@ -1041,6 +1041,43 @@ save(TableS3_dirty, file = '../SIdata/TableS3_dirty')
 
 ```
 
+# Study-level Results - Extened Data Figure 1
+
+
+```{r fig.height= 9, fig.width=8}
+
+Study_level_signifs<- read_csv('../SIdata/Study_level_signifs.csv')
+
+
+Study_level_signifs %>%
+  filter( Metric == 'D19_Tau') %>%
+  rename( Trait =trait  )  %>%
+  mutate( Trait = recode(Trait , "TR_BodyLength_mm"="Marine:  Body Length",
+                         "TR_QualBS_Numeric" = "Marine: Qual. Body Size" ,
+                         "TR_Mean_LengthMax"= "Fish: Max. Length", 
+                         "TR_adult_body_mass_g"= "Amniotes: Adult Body Mass",
+                         "TR_Mean_SeedMass"="Plants: Seed Mass",
+                         "TR_Max_Height"="Plants: Max. Height"  ),
+          significant  = recode(significant , 'zInsig'  = ''),
+          STUDY_ID = factor(STUDY_ID)) %>%
+  ggplot( aes(y =   STUDY_ID))+
+  geom_vline(xintercept = 0, linetype = 2, colour = 'grey')+
+  geom_errorbarh(aes(xmin= Bottom_025,  xmax =Top_975), height = 0)+
+  geom_errorbarh(aes(xmin= bottomsixth       ,  xmax =topsixth ), size = 1.5,height = 0)+
+  geom_point( aes(Tau , fill =significant ), shape = 21, size =2.15)+
+  facet_wrap(~Trait, scales = 'free_y')+
+  scale_fill_manual(values = c( 'grey' ,'yellow1','blue1') )+
+  theme_classic()+
+  guides( fill = FALSE)+
+  theme(axis.text.y = element_text(size = 7))+
+  scale_y_discrete(limits=rev)
+
+ggsave('../Plots/ExFigures/Terry_ED_1.jpg',
+       width = 8, height = 9, units ='in', dpi = 600 )
+
+```
+
+
 # Global distribution map (Figure 1)
 
 ```{r}
@@ -1139,12 +1176,10 @@ ggplot()+
   guides(colour = guide_colourbar(title.position="top",
                                   barwidth = 10))  ->   Map2
 
-
-ggsave( '../Plots/SingleMap2.png',plot = Map2, width = 13, height = 6)                     
-ggsave( '../Plots/SingleMap2.pdf',plot = Map2, width = 13, height = 6, device = cairo_pdf)                     
-
-
-
+# 
+# ggsave( '../Plots/SingleMap2.png',plot = Map2, width = 13, height = 6)                     
+# ggsave( '../Plots/SingleMap2.pdf',plot = Map2, width = 13, height = 6, device = cairo_pdf)                     
+# 
 ```
 
 
@@ -1240,8 +1275,7 @@ Map3<- plot_grid( DryMap+ggtitle('a) Terrestrial' ),
 
 
 ggsave( '../Plots/SplitMap3.png',plot = Map3, width = 7, height = 7, dpi = 300)                     
-ggsave( '../Plots/SplitMap3.pdf',plot = Map3, width = 7, height = 7, device = cairo_pdf)                     
-
+ggsave( '../Plots/Figure1.pdf',plot = Map3, width = 7, height = 7, device = cairo_pdf)                     
 ```
 
 
@@ -1529,8 +1563,7 @@ WinLossAll %>%
   ylab('Frequency within\neach trait bin')+
   scale_fill_manual(values = c('red', 'grey', 'darkgreen'), name = 'Category') -> SpeciesLevelPlots
 
-ggsave( '../Plots/SpeciesLevelPlots.png' ,SpeciesLevelPlots, width = 8, height =6, dpi = 300)
-ggsave( '../Plots/SpeciesLevelPlots.pdf' ,SpeciesLevelPlots, width = 8, height =6)
+ggsave( '../Plots/ExFigures/Terry_ED_6.jpg' ,SpeciesLevelPlots, width = 8, height =6, dpi = 500)
 
 
 WinnerStats<- map_df( TraitNames, function(t){
@@ -1590,6 +1623,35 @@ WinLossAll %>%
 
 ```
 
+\newpage
+
+# Saving Supplementary Data Table 
+
+```{r}
+
+read_csv('../Results/Study_Corr_Predictors.csv')%>%
+  left_join(select( read_csv('../BT_Tables/BioTIMEMetadata_02_04_2018.csv'),
+                    STUDY_ID, TITLE,CENT_LAT,CENT_LONG,ABUNDANCE_TYPE,BIOMASS_TYPE  ),
+            by = "STUDY_ID") %>%
+  left_join(read_csv('../BT_Tables/BioTIMECitations_24_06_2021_UTF.csv' ),
+            by = "STUDY_ID") %>%
+  arrange( Trait, Tau) %>%
+  mutate( Trait = recode(Trait , "TR_BodyLength_mm"="Marine:  Body Length",
+                         "TR_QualBS_Numeric" = "Marine: Qual. Body Size" ,
+                         "TR_Mean_LengthMax"= "Fish: Maximum Length",
+                         "TR_adult_body_mass_g"= "Amniotes: Adult body mass",
+                         "TR_Mean_SeedMass"="Plants: Seed Mass",
+                         "TR_Max_Height"="Plants: Maximum Height"  ))%>%
+  select('Trait tested' = Trait,
+         'ID' = STUDY_ID ,
+         Tau,
+         'Study Title' = TITLE,
+         'Citation' =CITATION_LINE   ,
+         CENT_LAT,CENT_LONG,ABUNDANCE_TYPE,BIOMASS_TYPE  ) %>%
+  write_csv('../SIdata/SuppData1.csv')
+
+
+```
 
 
 
